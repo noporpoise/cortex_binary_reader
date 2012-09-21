@@ -149,7 +149,7 @@ void print_usage()
 "  Prints out binary header information and kmers.  Also tests for multiple\n"
 "  zero kmers.\n"
 "\n"
-"  --print_kmes prints for every kmer:\n"
+"  --print_kmers prints for every kmer:\n"
 "    <kmer_seq> <covg_in_col0 ...> <edges_in_col0 ...>\n"
 "\n"
 "    e.g. GTAAGTGCCA 1 ..g....T\n"
