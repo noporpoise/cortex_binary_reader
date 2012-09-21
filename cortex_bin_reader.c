@@ -24,6 +24,10 @@ typedef enum
   Undefined = 4,
 } Nucleotide;
 
+// Are we printing kmers?
+char print_info = 1;
+char print_kmers = 0;
+char parse_kmers = 1;
 
 // Reading stats
 int num_of_kmers_read = 0;
@@ -41,7 +45,8 @@ void print_kmer_stats()
   if(num_of_oversized_kmers > 0)
     fprintf(stderr, "Error: %lu oversized kmers seen\n", num_of_oversized_kmers);
 
-  printf("kmers read: %lu\n", (unsigned long)num_of_kmers_read);
+  if(print_info || parse_kmers)
+    printf("kmers read: %lu\n", (unsigned long)num_of_kmers_read);
 }
 
 void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
@@ -52,7 +57,10 @@ void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
   {
     fprintf(stderr, "Couldn't read '%s': expected %li; recieved: %li; (exiting...)\n",
             entry_name, (long)nitems, (long)read);
-    
+
+    if(print_kmers)
+      printf("----\n");
+
     print_kmer_stats();
     exit(EXIT_FAILURE);
   }
@@ -175,19 +183,22 @@ char* binary_kmer_to_seq(uint64_t* bkmer, char * seq,
 void print_usage()
 {
   fprintf(stderr,
-"usage: cortex_bin_reader [--print_kmers] <binary.ctx>\n"
+"usage: cortex_bin_reader [OPTIONS] <binary.ctx>\n"
 "  Prints out header information and kmers for cortex_var binary files.  Runs\n"
 "  several checks to test if binary file is valid. \n"
 "\n"
-"  --print_kmers    prints kmers in the order they are listed in the file.\n"
-"                   For each kmer prints:\n"
+"  OPTIONS:\n"
+"  --print_info    Print out header info [default]\n"
+"  --print_kmers   Print out each kmer\n"
+"  --parse_kmers   Parse but don't print kmers [default]\n"
 "\n"
-"    <kmer_seq> <covg_in_col0 ...> <edges_in_col0 ...>\n"
+"  If no options are specified '--print_info --parse_kmers' is used\n"
 "\n"
+"  Kmers are printed in the order they are listed in the file. \n"
+"  For each kmer we print: <kmer_seq> <covg_in_col0 ...> <edges_in_col0 ...>\n"
 "    e.g. GTAAGTGCCA 6 4 ..g....T .c..A..T\n"
-"         meaning:\n"
-"            col 0: covg 6 [G]GTAAGTGCCA[T]\n"
-"            col 1: covg 4 [C]GTAAGTGCCA[A|T]\n"
+"         means col 0: covg 6 [G]GTAAGTGCCA[T]\n"
+"               col 1: covg 4 [C]GTAAGTGCCA[A|T]\n"
 "\n"
 "  Current Tests:\n"
 "    * Checks binary version is 6\n"
@@ -204,29 +215,37 @@ void print_usage()
 
 int main(int argc, char** argv)
 {
-  char print_kmers = 0;
   char* filepath;
 
-  if(argc < 2 || argc > 3)
+  if(argc < 2)
   {
     print_usage();
   }
-  else if(argc == 3)
+  else if(argc > 2)
   {
-    if(strcasecmp(argv[1], "--print_kmers") == 0)
+    print_info = 0;
+    print_kmers = 0;
+    parse_kmers = 0;
+
+    int i;
+
+    for(i = 1; i < argc-1; i++)
     {
-      print_kmers = 1;
-      filepath = argv[2];
+      if(strcasecmp(argv[i], "--print_info") == 0)
+        print_info = 1;
+      else if(strcasecmp(argv[i], "--print_kmers") == 0)
+        print_kmers = 1;
+      else if(strcasecmp(argv[i], "--parse_kmers") == 0)
+        parse_kmers = 1;
+      else
+        print_usage();
     }
-    else
-      print_usage();
-  }
-  else
-  {
-    filepath = argv[1];
   }
 
-  printf("Loading file: %s\n", filepath);
+  filepath = argv[argc-1];
+
+  if(print_info)
+    printf("Loading file: %s\n", filepath);
 
   FILE* fh = fopen(filepath, "r");
 
@@ -246,7 +265,8 @@ int main(int argc, char** argv)
   printf("long double: %i\n", (int)sizeof(long double));
   */
 
-  printf("----\n");
+  if(print_info)
+    printf("----\n");
 
   int i;
 
@@ -275,10 +295,13 @@ int main(int argc, char** argv)
   int num_of_colours;
   my_fread(&num_of_colours, sizeof(int), 1, fh, "number of colours");
 
-  printf("binary version: %i\n", version);
-  printf("kmer size: %i\n", kmer_size);
-  printf("bitfields: %i\n", num_of_bitfields);
-  printf("colours: %i\n", num_of_colours);
+  if(print_info)
+  {
+    printf("binary version: %i\n", version);
+    printf("kmer size: %i\n", kmer_size);
+    printf("bitfields: %i\n", num_of_bitfields);
+    printf("colours: %i\n", num_of_colours);
+  }
 
   // Checks
 
@@ -374,49 +397,52 @@ int main(int argc, char** argv)
 
   // Print colour info
 
-  for(i = 0; i < num_of_colours; i++)
+  if(print_info)
   {
-    printf("-- Colour %i --\n", i);
+    for(i = 0; i < num_of_colours; i++)
+    {
+      printf("-- Colour %i --\n", i);
 
-    printf("  sample name: '%s'\n", sample_names[i]);
-    printf("  mean read length: %i\n", mean_read_lens_per_colour[i]);
-    printf("  total sequence loaded: %li\n", total_seq_loaded_per_colour[i]);
-    printf("  sequence error rate: %Lf\n", seq_error_rates[i]);
+      printf("  sample name: '%s'\n", sample_names[i]);
+      printf("  mean read length: %i\n", mean_read_lens_per_colour[i]);
+      printf("  total sequence loaded: %li\n", total_seq_loaded_per_colour[i]);
+      printf("  sequence error rate: %Lf\n", seq_error_rates[i]);
 
-    printf("  tip clipping: %s\n", cleaning_infos[i].tip_cleaning ? "yes" : "no");
+      printf("  tip clipping: %s\n", cleaning_infos[i].tip_cleaning ? "yes" : "no");
 
-    if(cleaning_infos[i].remove_low_covg_supernodes)
-    {
-      printf("  remove_low_coverage_supernodes: yes [threshold: %i]\n",
-             cleaning_infos[i].remove_low_covg_supernodes_thresh);
-    }
-    else
-    {
-      printf("  remove_low_coverage_supernodes: no\n");
+      if(cleaning_infos[i].remove_low_covg_supernodes)
+      {
+        printf("  remove_low_coverage_supernodes: yes [threshold: %i]\n",
+               cleaning_infos[i].remove_low_covg_supernodes_thresh);
+      }
+      else
+      {
+        printf("  remove_low_coverage_supernodes: no\n");
+      }
+
+      if(cleaning_infos[i].remove_low_covg_kmers)
+      {
+        printf("  remove_low_coverage_kmers: yes [threshold: %i]\n",
+               cleaning_infos[i].remove_low_covg_kmer_thresh);
+      }
+      else
+      {
+        printf("  remove_low_coverage_kmers: no\n");
+      }
+
+      if(cleaning_infos[i].cleaned_against_graph)
+      {
+        printf("  cleaned against graph: yes [against: '%s']\n",
+               cleaning_infos[i].name_of_graph_clean_against);
+      }
+      else
+      {
+        printf("  cleaned against graph: no\n");
+      }
     }
 
-    if(cleaning_infos[i].remove_low_covg_kmers)
-    {
-      printf("  remove_low_coverage_kmers: yes [threshold: %i]\n",
-             cleaning_infos[i].remove_low_covg_kmer_thresh);
-    }
-    else
-    {
-      printf("  remove_low_coverage_kmers: no\n");
-    }
-
-    if(cleaning_infos[i].cleaned_against_graph)
-    {
-      printf("  cleaned against graph: yes [against: '%s']\n",
-             cleaning_infos[i].name_of_graph_clean_against);
-    }
-    else
-    {
-      printf("  cleaned against graph: no\n");
-    }
+    printf("----\n");
   }
-
-  printf("----\n");
 
   // Read magic word at the end of header
   my_fread(magic_word, sizeof(char), 6, fh, "magic word (end)");
@@ -426,6 +452,13 @@ int main(int argc, char** argv)
     fprintf(stderr, "Error: magic word doesn't match 'CORTEX' (end): '%s'\n",
             magic_word);
     exit(EXIT_FAILURE);
+  }
+
+  // Finished parsing header
+  if(!parse_kmers && !print_kmers)
+  {
+    fclose(fh);
+    exit(EXIT_SUCCESS);
   }
 
   // Kmer data
@@ -505,6 +538,9 @@ int main(int argc, char** argv)
 
     num_of_kmers_read++;
   }
+
+  if(print_kmers && print_info)
+    printf("----\n");
 
   if(errno != 0)
     fprintf(stderr, "Error: errno set [%i]\n", (int)errno);
