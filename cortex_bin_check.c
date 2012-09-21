@@ -1,0 +1,438 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <inttypes.h>
+
+typedef struct
+{
+  char tip_cleaning;
+  char remove_low_covg_supernodes;
+  char remove_low_covg_kmers;
+  char cleaned_against_graph;
+  int remove_low_covg_supernodes_thresh;
+  int remove_low_covg_kmer_thresh;
+  char* name_of_graph_clean_against;
+} CleaningInfo;
+
+typedef enum
+{
+  Adenine   = 0,
+  Cytosine  = 1,
+  Guanine   = 2,
+  Thymine   = 3,
+  Undefined = 4,
+} Nucleotide;
+
+void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
+              char* entry_name)
+{
+  size_t read;
+  if((read = fread(ptr, size, nitems, stream)) != nitems)
+  {
+    fprintf(stderr, "Couldn't read '%s': expected %li; recieved: %li;\n",
+            entry_name, (long)nitems, (long)read);
+    exit(EXIT_FAILURE);
+  }
+
+  int err;
+  if((err = ferror(stream)) != 0)
+  {
+    fprintf(stderr, "An error occurred on file reading: %i\n", err);
+  }
+}
+
+char binary_nucleotide_to_char(Nucleotide n)
+{
+  switch (n)
+  {
+    case Adenine:
+      return 'A';
+    case Cytosine:
+      return 'C';
+    case Guanine:
+      return 'G';
+    case Thymine:
+      return 'T';
+    default:
+      fprintf(stderr, "Non existent binary nucleotide %d\n", n);
+      exit(EXIT_FAILURE);
+  }
+}
+
+char char_rev_comp(char c)
+{
+  switch(c)
+  {
+    case 'T':
+      return 'A';
+    case 'G':
+      return 'C';
+    case 'C':
+      return 'G';
+    case 'A':
+      return 'T';
+    case 't':
+      return 'a';
+    case 'g':
+      return 'c';
+    case 'c':
+      return 'g';
+    case 'a':
+      return 't';
+    default:
+      fprintf(stderr, "Non existent char nucleotide %c\n", c);
+      exit(EXIT_FAILURE);
+  }
+}
+
+void binary_kmer_right_shift_one_base(uint64_t* kmer, int num_of_bitfields)
+{
+  int i;
+  for(i = num_of_bitfields-1; i > 0; i--)
+  {
+    kmer[i] >>= 2;
+    kmer[i] |= (kmer[i-1] << 62); // & 0x3
+  }
+
+  kmer[0] >>= 2;
+}
+
+char* get_edges_str(char edges, char* kmer_colour_edge_str)
+{
+  int i;
+
+  char *str = "acgtACGT";
+
+  char left = edges >> 4;
+  char right = edges & 0xf;
+
+  for(i = 0; i < 4; i++)
+    kmer_colour_edge_str[i] = (left & (0x1 << (3-i)) ? str[i] : '.');
+
+  for(i = 0; i < 4; i++)
+    kmer_colour_edge_str[i+4] = (right & (0x1 << i) ? str[i+4] : '.');
+
+  kmer_colour_edge_str[8] = '\0';
+
+  return kmer_colour_edge_str;
+}
+
+char* binary_kmer_to_seq(uint64_t* bkmer, char * seq,
+                         int kmer_size, int num_of_bitfields)
+{
+  uint64_t local_bkmer[num_of_bitfields];
+
+  int i;
+
+  // Copy over a word at a time
+  for(i = 0; i < num_of_bitfields; i++)
+  {
+    local_bkmer[i] = bkmer[i];
+  }
+
+  // Loop backwards over bases
+  for(i = kmer_size-1; i >= 0; i--)
+  {
+    seq[i] = binary_nucleotide_to_char(local_bkmer[num_of_bitfields-1] & 0x3);
+    binary_kmer_right_shift_one_base(local_bkmer, num_of_bitfields);
+  }
+
+  seq[kmer_size] = '\0';
+
+  return seq;
+}
+
+void print_usage()
+{
+  fprintf(stderr,
+"usage: cortex_bin_check [--print_kmers] <binary.ctx>\n"
+"  Prints out binary header information and kmers.  Also tests for multiple\n"
+"  zero kmers.\n"
+"\n"
+"  --print_kmes prints for every kmer:\n"
+"    <kmer_seq> <covg_in_col0 ...> <edges_in_col0 ...>\n"
+"\n"
+"    e.g. GTAAGTGCCA 1 ..g....T\n"
+"         meaning: [g]GTAAGTGCCA[t]\n");
+
+  exit(EXIT_FAILURE);
+}
+
+int main(int argc, char** argv)
+{
+  char print_kmers = 0;
+  char* filepath;
+
+  if(argc < 2 || argc > 3)
+  {
+    print_usage();
+  }
+  else if(argc == 3)
+  {
+    if(strcasecmp(argv[1], "--print_kmers") == 0)
+    {
+      print_kmers = 1;
+      filepath = argv[2];
+    }
+    else
+      print_usage();
+  }
+  else
+  {
+    filepath = argv[1];
+  }
+
+  printf("Loading file: %s\n", filepath);
+
+  FILE* fh = fopen(filepath, "r");
+
+  if(fh == NULL)
+  {
+    fprintf(stderr, "Error: cannot open file '%s'\n", filepath);
+    exit(EXIT_FAILURE);
+  }
+
+  /*
+  // Check sizes
+  printf("-- Datatypes --\n");
+  printf("int: %i\n", (int)sizeof(int));
+  printf("long: %i\n", (int)sizeof(long));
+  printf("long long: %i\n", (int)sizeof(long long));
+  printf("double: %i\n", (int)sizeof(double));
+  printf("long double: %i\n", (int)sizeof(long double));
+  */
+
+  printf("----\n");
+
+  int i;
+
+  // Read magic word at the start of header
+  char magic_word[7];
+  magic_word[6] = '\0';
+
+  my_fread(magic_word, sizeof(char), 6, fh, "Magic word");
+
+  if(strcmp(magic_word, "CORTEX") != 0)
+  {
+    fprintf(stderr, "Magic word doesn't match 'CORTEX' (start)\n");
+    exit(EXIT_FAILURE);
+  }
+
+  // Read version number
+  int version;
+  my_fread(&version, sizeof(int), 1, fh, "binary version");
+
+  int kmer_size;
+  my_fread(&kmer_size, sizeof(int), 1, fh, "kmer size");
+
+  int num_of_bitfields;
+  my_fread(&num_of_bitfields, sizeof(int), 1, fh, "number of bitfields");
+
+  int num_of_colours;
+  my_fread(&num_of_colours, sizeof(int), 1, fh, "number of colours");
+
+  printf("binary version: %i\n", version);
+  printf("kmer size: %i\n", kmer_size);
+  printf("bitfields: %i\n", num_of_bitfields);
+  printf("colours: %i\n", num_of_colours);
+
+  int *mean_read_lens_per_colour = (int*)malloc(num_of_colours*sizeof(int));
+  my_fread(mean_read_lens_per_colour, sizeof(int), num_of_colours, fh,
+           "mean read length for each colour");
+
+  long *total_seq_loaded_per_colour = (long*)malloc(num_of_colours*sizeof(long));
+  my_fread(total_seq_loaded_per_colour, sizeof(long), num_of_colours, fh,
+           "total sequance loaded for each colour");
+
+
+  char **sample_names = (char**)malloc(sizeof(char*) * num_of_colours);
+
+  for(i = 0; i < num_of_colours; i++)
+  {
+    int str_length;
+    my_fread(&str_length, sizeof(int), 1, fh, "sample name length");
+
+    if(str_length == 0)
+    {
+      sample_names[i] = NULL;
+    }
+    else
+    {
+      sample_names[i] = (char*)malloc(str_length * sizeof(char)+1);
+      my_fread(sample_names[i], sizeof(char), str_length, fh, "sample name");
+      sample_names[i][str_length] = '\0';
+    }
+  }
+
+  long double *seq_error_rates = malloc(sizeof(long double) * num_of_colours);
+  my_fread(seq_error_rates, sizeof(long double), num_of_colours, fh,
+           "seq error rates");
+
+  CleaningInfo *cleaning_infos = (CleaningInfo*)malloc(sizeof(CleaningInfo) * num_of_colours);
+
+  for(i = 0; i < num_of_colours; i++)
+  {
+    my_fread(&(cleaning_infos[i].tip_cleaning), sizeof(char), 1, fh,
+             "tip cleaning");
+    my_fread(&(cleaning_infos[i].remove_low_covg_supernodes), sizeof(char), 1, fh,
+             "remove low covg supernodes");
+    my_fread(&(cleaning_infos[i].remove_low_covg_kmers), sizeof(char), 1, fh,
+             "remove low covg kmers");
+    my_fread(&(cleaning_infos[i].cleaned_against_graph), sizeof(char), 1, fh,
+             "cleaned against graph");
+
+    my_fread(&(cleaning_infos[i].remove_low_covg_supernodes_thresh), sizeof(int),
+             1, fh, "remove low covg supernode threshold");
+  
+    my_fread(&(cleaning_infos[i].remove_low_covg_kmer_thresh), sizeof(int),
+             1, fh, "remove low covg kmer threshold");
+
+    int name_length;
+    my_fread(&name_length, sizeof(int), 1, fh, "graph name length");
+
+    if(name_length == 0)
+    {
+      cleaning_infos[i].name_of_graph_clean_against = NULL;
+    }
+    else
+    {
+      cleaning_infos[i].name_of_graph_clean_against
+        = malloc((name_length+1) * sizeof(char));
+
+      my_fread(cleaning_infos + i, sizeof(char), name_length, fh,
+               "graph name length");
+
+      cleaning_infos[i].name_of_graph_clean_against[name_length] = '\0';
+    }
+  }
+
+  // Print colour info
+
+  for(i = 0; i < num_of_colours; i++)
+  {
+    printf("-- Colour %i --\n", i);
+
+    printf("  sample name: '%s'\n", sample_names[i]);
+    printf("  mean read length: %i\n", mean_read_lens_per_colour[i]);
+    printf("  total sequence loaded: %li\n", total_seq_loaded_per_colour[i]);
+    printf("  sequence error rate: %Lf\n", seq_error_rates[i]);
+
+    printf("  tip clipping: %s\n", cleaning_infos[i].tip_cleaning ? "yes" : "no");
+
+    if(cleaning_infos[i].remove_low_covg_supernodes)
+    {
+      printf("  remove_low_coverage_supernodes: yes [threshold: %i]\n",
+             cleaning_infos[i].remove_low_covg_supernodes_thresh);
+    }
+    else
+    {
+      printf("  remove_low_coverage_supernodes: no\n");
+    }
+
+    if(cleaning_infos[i].remove_low_covg_kmers)
+    {
+      printf("  remove_low_coverage_kmers: yes [threshold: %i]\n",
+             cleaning_infos[i].remove_low_covg_kmer_thresh);
+    }
+    else
+    {
+      printf("  remove_low_coverage_kmers: no\n");
+    }
+
+    if(cleaning_infos[i].cleaned_against_graph)
+    {
+      printf("  cleaned against graph: yes [against: '%s']\n",
+             cleaning_infos[i].name_of_graph_clean_against);
+    }
+    else
+    {
+      printf("  cleaned against graph: no\n");
+    }
+  }
+
+  printf("----\n");
+
+  // Read magic word at the end of header
+  my_fread(magic_word, sizeof(char), 6, fh, "magic word (end)");
+
+  if(strcmp(magic_word, "CORTEX") != 0)
+  {
+    fprintf(stderr, "Error: magic word doesn't match 'CORTEX' (end): '%s'\n",
+            magic_word);
+    exit(EXIT_FAILURE);
+  }
+
+  // Read binary kmers
+  int num_of_kmers_read = 0;
+  unsigned long num_of_all_zero_kmers = 0;
+
+  // Kmer data
+  uint64_t* kmer = (uint64_t*)malloc(sizeof(uint64_t) * num_of_bitfields);
+  char* seq = (char*)malloc(sizeof(char) * kmer_size);
+  uint32_t* covgs = (uint32_t*)malloc(sizeof(uint32_t) * num_of_colours);
+  char* edges = (char*)malloc(sizeof(char) * kmer_size);
+  char kmer_colour_edge_str[9];
+
+  while(fread(kmer, sizeof(uint64_t), num_of_bitfields, fh) > 0)
+  {
+    my_fread(covgs, sizeof(uint32_t), num_of_colours, fh, "kmer covg");
+    my_fread(edges, sizeof(char), num_of_colours, fh, "kmer edges");
+
+    // Print?
+    if(print_kmers)
+    {
+      binary_kmer_to_seq(kmer, seq, kmer_size, num_of_bitfields);
+      printf("%s", seq);
+
+      // Print coverages
+      for(i = 0; i < num_of_colours; i++)
+        printf(" %li", (unsigned long)covgs[i]);
+
+      // Print edges
+      for(i = 0; i < num_of_colours; i++)
+        printf(" %s", get_edges_str(edges[i], kmer_colour_edge_str));
+
+      printf("\n");
+    }
+
+    // Test for all-zeros
+    char kmer_all_zero = 1;
+
+    for(i = 0; kmer_all_zero && i < num_of_bitfields; i++)
+      if(kmer[i] != 0)
+        kmer_all_zero = 0;
+
+    if(kmer_all_zero)
+    {
+      if(num_of_all_zero_kmers == 0)
+        fprintf(stderr, "Error: more than 1 all-zero-kmers seen\n");
+
+      num_of_all_zero_kmers++;
+    }
+
+    num_of_kmers_read++;
+  }
+
+  char tmp_c;
+  if(fread(&tmp_c, sizeof(char), 1, fh) != 0)
+  {
+    fprintf(stderr, "Error: extra bytes in file\n");
+  }
+
+  int err;
+  if((err = ferror(fh)) != 0)
+  {
+    fprintf(stderr, "An error occurred after file reading: %i\n", err);
+  }
+
+  if(num_of_all_zero_kmers > 0)
+  {
+    fprintf(stderr, "Error: %lu all-zero-kmers seen\n", num_of_all_zero_kmers);
+  }
+
+  printf("%lu kmers read\n", (unsigned long)num_of_kmers_read);
+
+  fclose(fh);
+
+  exit(EXIT_SUCCESS);
+}
