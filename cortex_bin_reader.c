@@ -23,14 +23,36 @@ typedef enum
   Undefined = 4,
 } Nucleotide;
 
+
+// Reading stats
+int num_of_kmers_read = 0;
+
+// Checks
+unsigned long num_of_all_zero_kmers = 0;
+unsigned long num_of_oversized_kmers = 0;
+
+
+void print_kmer_stats()
+{
+  if(num_of_all_zero_kmers > 1)
+    fprintf(stderr, "Error: %lu all-zero-kmers seen\n", num_of_all_zero_kmers);
+
+  if(num_of_oversized_kmers > 0)
+    fprintf(stderr, "Error: %lu oversized kmers seen\n", num_of_oversized_kmers);
+
+  printf("kmers read: %lu\n", (unsigned long)num_of_kmers_read);
+}
+
 void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
               char* entry_name)
 {
   size_t read;
   if((read = fread(ptr, size, nitems, stream)) != nitems)
   {
-    fprintf(stderr, "Couldn't read '%s': expected %li; recieved: %li;\n",
+    fprintf(stderr, "Couldn't read '%s': expected %li; recieved: %li; (exiting...)\n",
             entry_name, (long)nitems, (long)read);
+    
+    print_kmer_stats();
     exit(EXIT_FAILURE);
   }
 
@@ -39,6 +61,13 @@ void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
   {
     fprintf(stderr, "An error occurred on file reading: %i\n", err);
   }
+}
+
+void print_binary(FILE* stream, uint64_t binary)
+{
+  int i;
+  for(i = 63; i >= 0; i--)
+    fprintf(stream, "%c", ((binary >> i) & 0x1 ? '1' : '0'));
 }
 
 char binary_nucleotide_to_char(Nucleotide n)
@@ -145,15 +174,29 @@ char* binary_kmer_to_seq(uint64_t* bkmer, char * seq,
 void print_usage()
 {
   fprintf(stderr,
-"usage: cortex_bin_check [--print_kmers] <binary.ctx>\n"
-"  Prints out binary header information and kmers.  Also tests for multiple\n"
-"  zero kmers.\n"
+"usage: cortex_bin_reader [--print_kmers] <binary.ctx>\n"
+"  Prints out header information and kmers for cortex_var binary files.  Runs\n"
+"  several checks to test if binary file is valid. \n"
 "\n"
-"  --print_kmers prints for every kmer:\n"
+"  --print_kmers    prints kmers in the order they are listed in the file.\n"
+"                   For each kmer prints:\n"
+"\n"
 "    <kmer_seq> <covg_in_col0 ...> <edges_in_col0 ...>\n"
 "\n"
-"    e.g. GTAAGTGCCA 1 ..g....T\n"
-"         meaning: [g]GTAAGTGCCA[t]\n");
+"    e.g. GTAAGTGCCA 6 4 ..g....T .c..A..T\n"
+"         meaning:\n"
+"            col 0: covg 6 [G]GTAAGTGCCA[T]\n"
+"            col 1: covg 4 [C]GTAAGTGCCA[A|T]\n"
+"\n"
+"  Current Tests:\n"
+"    * Checks binary version is 6\n"
+"    * Checks kmer size is an odd number > 1\n"
+"    * Checks number of bitfields is compatible with kmer size\n"
+"    * Checks number of colours is > 0\n"
+"    * Checks each kmer's top bits are all zeroed (i.e. kmer is not 'oversized')\n"
+"    * Checks if more than one kmer is all As i.e. multiple 'AAAAAAAA' kmers\n"
+"\n"
+"  Comments/bugs/requests: <turner.isaac@gmail.com>\n");
 
   exit(EXIT_FAILURE);
 }
@@ -235,6 +278,28 @@ int main(int argc, char** argv)
   printf("kmer size: %i\n", kmer_size);
   printf("bitfields: %i\n", num_of_bitfields);
   printf("colours: %i\n", num_of_colours);
+
+  // Checks
+
+  if(version != 6)
+    fprintf(stderr, "Error: binary version is not '6'\n");
+
+  if(kmer_size % 2 == 0)
+    fprintf(stderr, "Error: kmer size is not an odd number\n");
+
+  if(kmer_size < 3)
+    fprintf(stderr, "Error: kmer size is less than three\n");
+
+  if(num_of_bitfields * 32 < kmer_size)
+    fprintf(stderr, "Error: Not enough bitfields for kmer size\n");
+
+  if((num_of_bitfields-1)*32 > kmer_size)
+    fprintf(stderr, "Error: using more than the minimum number of bitfields\n");
+
+  if(num_of_colours == 0)
+    fprintf(stderr, "Error: number of colours is zero\n");
+
+  //
 
   int *mean_read_lens_per_colour = (int*)malloc(num_of_colours*sizeof(int));
   my_fread(mean_read_lens_per_colour, sizeof(int), num_of_colours, fh,
@@ -362,16 +427,15 @@ int main(int argc, char** argv)
     exit(EXIT_FAILURE);
   }
 
-  // Read binary kmers
-  int num_of_kmers_read = 0;
-  unsigned long num_of_all_zero_kmers = 0;
-
   // Kmer data
   uint64_t* kmer = (uint64_t*)malloc(sizeof(uint64_t) * num_of_bitfields);
   char* seq = (char*)malloc(sizeof(char) * kmer_size);
   uint32_t* covgs = (uint32_t*)malloc(sizeof(uint32_t) * num_of_colours);
   char* edges = (char*)malloc(sizeof(char) * kmer_size);
   char kmer_colour_edge_str[9];
+
+  int bits_in_top_word = 2 * (kmer_size % 32);
+  uint64_t top_word_mask = (~(uint64_t)0) << bits_in_top_word;
 
   while(fread(kmer, sizeof(uint64_t), num_of_bitfields, fh) > 0)
   {
@@ -395,17 +459,34 @@ int main(int argc, char** argv)
       printf("\n");
     }
 
-    // Test for all-zeros
-    char kmer_all_zero = 1;
-
-    for(i = 0; kmer_all_zero && i < num_of_bitfields; i++)
-      if(kmer[i] != 0)
-        kmer_all_zero = 0;
-
-    if(kmer_all_zero)
+    // Check top bits of kmer
+    if(kmer[0] & top_word_mask)
     {
-      if(num_of_all_zero_kmers == 0)
-        fprintf(stderr, "Error: more than 1 all-zero-kmers seen\n");
+      if(num_of_oversized_kmers == 0)
+      {
+        fprintf(stderr, "Error: oversized kmer\n");
+
+        for(i = 0; i < num_of_bitfields; i++)
+        {
+          fprintf(stderr, "  word %i: ", i);
+          print_binary(stderr, kmer[i]);
+          fprintf(stderr, "\n");
+        }
+      }
+
+      num_of_oversized_kmers++;
+    }
+
+    // Check for all-zeros (i.e. all As kmer: AAAAAA)
+    uint64_t kmer_words_or = 0;
+
+    for(i = 0; i < num_of_bitfields; i++)
+      kmer_words_or |= kmer[i];
+
+    if(kmer_words_or == 0)
+    {
+      if(num_of_all_zero_kmers == 1)
+        fprintf(stderr, "Error: more than one all 'A's kmers seen\n");
 
       num_of_all_zero_kmers++;
     }
@@ -415,22 +496,13 @@ int main(int argc, char** argv)
 
   char tmp_c;
   if(fread(&tmp_c, sizeof(char), 1, fh) != 0)
-  {
     fprintf(stderr, "Error: extra bytes in file\n");
-  }
 
   int err;
   if((err = ferror(fh)) != 0)
-  {
-    fprintf(stderr, "An error occurred after file reading: %i\n", err);
-  }
+    fprintf(stderr, "Error: occurred after file reading [%i]\n", err);
 
-  if(num_of_all_zero_kmers > 0)
-  {
-    fprintf(stderr, "Error: %lu all-zero-kmers seen\n", num_of_all_zero_kmers);
-  }
-
-  printf("%lu kmers read\n", (unsigned long)num_of_kmers_read);
+  print_kmer_stats();
 
   fclose(fh);
 

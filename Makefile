@@ -1,5 +1,5 @@
-all:
-	gcc -Wall -Wextra -o cortex_bin_check cortex_bin_check.c
+all: clean
+	gcc -Wall -Wextra -o cortex_bin_reader cortex_bin_reader.c
 
 clean:
-	rm -rf cortex_bin_check
+	rm -rf cortex_bin_reader
