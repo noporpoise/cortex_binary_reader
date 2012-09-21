@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
+#include <errno.h>
 
 typedef struct
 {
@@ -437,8 +438,19 @@ int main(int argc, char** argv)
   int bits_in_top_word = 2 * (kmer_size % 32);
   uint64_t top_word_mask = (~(uint64_t)0) << bits_in_top_word;
 
-  while(fread(kmer, sizeof(uint64_t), num_of_bitfields, fh) > 0)
+  // Read kmer in bytes so we can see if there are extra bytes at the end of
+  // the file
+  size_t chars_read;
+
+  while((chars_read = fread(kmer, sizeof(char), 8*num_of_bitfields, fh)) > 0)
   {
+    if(chars_read != (size_t)8*num_of_bitfields)
+    {
+      fprintf(stderr, "Error: unusual extra bytes [%i] at the end of the file\n",
+              (int)chars_read);
+      break;
+    }
+
     my_fread(covgs, sizeof(uint32_t), num_of_colours, fh, "kmer covg");
     my_fread(edges, sizeof(char), num_of_colours, fh, "kmer edges");
 
@@ -494,9 +506,8 @@ int main(int argc, char** argv)
     num_of_kmers_read++;
   }
 
-  char tmp_c;
-  if(fread(&tmp_c, sizeof(char), 1, fh) != 0)
-    fprintf(stderr, "Error: extra bytes in file\n");
+  if(errno != 0)
+    fprintf(stderr, "Error: errno set [%i]\n", (int)errno);
 
   int err;
   if((err = ferror(fh)) != 0)
