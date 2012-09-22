@@ -8,16 +8,16 @@ char        |    6   | the string "CORTEX" (Note: not null-terminated)
 --------------------------------------------------------------------------------
 Header:
 --------------------------------------------------------------------------------
-uint64_t    |    1   | version number
-uint64_t    |    1   | kmer size (<kmer_size>)
-uint64_t    |    1   | number of uint64_t (64 bit words) encoding a kmer (<W>)
-uint64_t    |    1   | number of colours (<cols>)
-uint64_t    | <cols> | mean read length for each colour
+uint32_t    |    1   | version number
+uint32_t    |    1   | kmer size (<kmer_size>)
+uint32_t    |    1   | number of uint64_t (64 bit words) encoding a kmer (<W>)
+uint32_t    |    1   | number of colours (<cols>)
+uint32_t    | <cols> | mean read length for each colour
 uint64_t    | <cols> | total sequence loaded into each colour
 --------------------------------------------------------------------------------
 Sample names (repeated <col> times):
 --------------------------------------------------------------------------------
-uint64_t    |    1   | length of sample name of i-th colour (<len>)
+uint32_t    |    1   | length of sample name of i-th colour (<len>)
 char        |  <len> | sample name for colour i (Note: not null-terminated)
 --------------------------------------------------------------------------------
 Sequencing error rate:
@@ -30,16 +30,16 @@ char        |   1   | was there top clipping (0x1=yes | 0x0=no)
 char        |   1   | was --remove_low_covg_supernodes used (0x1=yes | 0x0=no)
 char        |   1   | was --remove_low_covg_kmers used (0x1=yes | 0x0=no)
 char        |   1   | was this colour cleaned against a graph (0x1=yes | 0x0=no)
-uint64_t    |   1   | threshold for --remove_low_coverage_supernodes
-uint64_t    |   1   | threshold for --remove_low_coverage_kmer
-uint64_t    |   1   | length of name of graph against which this colour was cleaned (<len>)
+uint32_t    |   1   | threshold for --remove_low_coverage_supernodes
+uint32_t    |   1   | threshold for --remove_low_coverage_kmer
+uint32_t    |   1   | length of name of graph against which this colour was cleaned (<len>)
 char        | <len> | name of graph against which this colour was cleaned
 --------------------------------------------------------------------------------
 Header end:
 --------------------------------------------------------------------------------
 char        |   6   | the string "CORTEX" (Note: not null-terminated)
 --------------------------------------------------------------------------------
-Kmers:
+Kmers (there may be zero or more of these entries):
 --------------------------------------------------------------------------------
 uint64_t    |  <W>  | binary kmer
 uint32_t    | <col> | array of coverage values for colours 0..<col-1>

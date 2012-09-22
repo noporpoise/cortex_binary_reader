@@ -10,8 +10,8 @@ typedef struct
   char remove_low_covg_supernodes;
   char remove_low_covg_kmers;
   char cleaned_against_graph;
-  int remove_low_covg_supernodes_thresh;
-  int remove_low_covg_kmer_thresh;
+  uint32_t remove_low_covg_supernodes_thresh;
+  uint32_t remove_low_covg_kmer_thresh;
   char* name_of_graph_clean_against;
 } CleaningInfo;
 
@@ -277,7 +277,7 @@ int main(int argc, char** argv)
   if(print_info)
     printf("----\n");
 
-  int i;
+  unsigned int i;
 
   // Read magic word at the start of header
   char magic_word[7];
@@ -292,24 +292,24 @@ int main(int argc, char** argv)
   }
 
   // Read version number
-  int version;
-  my_fread(&version, sizeof(int), 1, fh, "binary version");
+  uint32_t version;
+  my_fread(&version, sizeof(uint32_t), 1, fh, "binary version");
 
-  int kmer_size;
-  my_fread(&kmer_size, sizeof(int), 1, fh, "kmer size");
+  uint32_t kmer_size;
+  my_fread(&kmer_size, sizeof(uint32_t), 1, fh, "kmer size");
 
-  int num_of_bitfields;
-  my_fread(&num_of_bitfields, sizeof(int), 1, fh, "number of bitfields");
+  uint32_t num_of_bitfields;
+  my_fread(&num_of_bitfields, sizeof(uint32_t), 1, fh, "number of bitfields");
 
-  int num_of_colours;
-  my_fread(&num_of_colours, sizeof(int), 1, fh, "number of colours");
+  uint32_t num_of_colours;
+  my_fread(&num_of_colours, sizeof(uint32_t), 1, fh, "number of colours");
 
   if(print_info)
   {
-    printf("binary version: %i\n", version);
-    printf("kmer size: %i\n", kmer_size);
-    printf("bitfields: %i\n", num_of_bitfields);
-    printf("colours: %i\n", num_of_colours);
+    printf("binary version: %i\n", (int)version);
+    printf("kmer size: %i\n", (int)kmer_size);
+    printf("bitfields: %i\n", (int)num_of_bitfields);
+    printf("colours: %i\n", (int)num_of_colours);
   }
 
   // Checks
@@ -334,11 +334,17 @@ int main(int argc, char** argv)
 
   //
 
-  int *mean_read_lens_per_colour = (int*)malloc(num_of_colours*sizeof(int));
+  // Read array of mean read lengths per colour
+  uint32_t *mean_read_lens_per_colour
+    = (uint32_t*)malloc(num_of_colours*sizeof(uint32_t));
+
   my_fread(mean_read_lens_per_colour, sizeof(int), num_of_colours, fh,
            "mean read length for each colour");
 
-  long *total_seq_loaded_per_colour = (long*)malloc(num_of_colours*sizeof(long));
+  // Read array of total seq loaded per colour
+  uint64_t *total_seq_loaded_per_colour
+    = (uint64_t*)malloc(num_of_colours*sizeof(uint64_t));
+
   my_fread(total_seq_loaded_per_colour, sizeof(long), num_of_colours, fh,
            "total sequance loaded for each colour");
 
@@ -379,14 +385,14 @@ int main(int argc, char** argv)
     my_fread(&(cleaning_infos[i].cleaned_against_graph), sizeof(char), 1, fh,
              "cleaned against graph");
 
-    my_fread(&(cleaning_infos[i].remove_low_covg_supernodes_thresh), sizeof(int),
+    my_fread(&(cleaning_infos[i].remove_low_covg_supernodes_thresh), sizeof(uint32_t),
              1, fh, "remove low covg supernode threshold");
   
-    my_fread(&(cleaning_infos[i].remove_low_covg_kmer_thresh), sizeof(int),
+    my_fread(&(cleaning_infos[i].remove_low_covg_kmer_thresh), sizeof(uint32_t),
              1, fh, "remove low covg kmer threshold");
 
-    int name_length;
-    my_fread(&name_length, sizeof(int), 1, fh, "graph name length");
+    uint32_t name_length;
+    my_fread(&name_length, sizeof(uint32_t), 1, fh, "graph name length");
 
     if(name_length == 0)
     {
@@ -413,8 +419,8 @@ int main(int argc, char** argv)
       printf("-- Colour %i --\n", i);
 
       printf("  sample name: '%s'\n", sample_names[i]);
-      printf("  mean read length: %i\n", mean_read_lens_per_colour[i]);
-      printf("  total sequence loaded: %li\n", total_seq_loaded_per_colour[i]);
+      printf("  mean read length: %u\n", (unsigned int)mean_read_lens_per_colour[i]);
+      printf("  total sequence loaded: %lu\n", (unsigned long)total_seq_loaded_per_colour[i]);
       printf("  sequence error rate: %Lf\n", seq_error_rates[i]);
 
       printf("  tip clipping: %s\n", cleaning_infos[i].tip_cleaning ? "yes" : "no");
@@ -472,11 +478,14 @@ int main(int argc, char** argv)
 
   // Kmer data
   uint64_t* kmer = (uint64_t*)malloc(sizeof(uint64_t) * num_of_bitfields);
-  char* seq = (char*)malloc(sizeof(char) * kmer_size);
   uint32_t* covgs = (uint32_t*)malloc(sizeof(uint32_t) * num_of_colours);
   char* edges = (char*)malloc(sizeof(char) * kmer_size);
+
+  // Convert values to strings
+  char* seq = (char*)malloc(sizeof(char) * kmer_size);
   char kmer_colour_edge_str[9];
 
+  // Check top word of each kmer
   int bits_in_top_word = 2 * (kmer_size % 32);
   uint64_t top_word_mask = (~(uint64_t)0) << bits_in_top_word;
 
@@ -484,9 +493,11 @@ int main(int argc, char** argv)
   // the file
   size_t chars_read;
 
-  while((chars_read = fread(kmer, sizeof(char), 8*num_of_bitfields, fh)) > 0)
+  size_t num_bytes_per_bkmer = sizeof(uint64_t)*num_of_bitfields;
+
+  while((chars_read = fread(kmer, 1, num_bytes_per_bkmer, fh)) > 0)
   {
-    if(chars_read != (size_t)8*num_of_bitfields)
+    if(chars_read != num_bytes_per_bkmer)
     {
       fprintf(stderr, "Error: unusual extra bytes [%i] at the end of the file\n",
               (int)chars_read);
