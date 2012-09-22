@@ -35,7 +35,7 @@ int num_of_kmers_read = 0;
 // Checks
 unsigned long num_of_all_zero_kmers = 0;
 unsigned long num_of_oversized_kmers = 0;
-
+unsigned long num_of_zero_covg_kmers = 0;
 
 void print_kmer_stats()
 {
@@ -44,6 +44,12 @@ void print_kmer_stats()
 
   if(num_of_oversized_kmers > 0)
     fprintf(stderr, "Error: %lu oversized kmers seen\n", num_of_oversized_kmers);
+
+  if(num_of_zero_covg_kmers > 0)
+  {
+    fprintf(stderr, "Error: %lu kmers have no coverage is any colour\n",
+            num_of_zero_covg_kmers);
+  }
 
   if(print_info || parse_kmers)
     printf("kmers read: %lu\n", (unsigned long)num_of_kmers_read);
@@ -200,13 +206,16 @@ void print_usage()
 "         means col 0: covg 6 [G]GTAAGTGCCA[T]\n"
 "               col 1: covg 4 [C]GTAAGTGCCA[A|T]\n"
 "\n"
-"  Current Tests:\n"
-"    * Checks binary version is 6\n"
-"    * Checks kmer size is an odd number > 1\n"
-"    * Checks number of bitfields is compatible with kmer size\n"
-"    * Checks number of colours is > 0\n"
-"    * Checks each kmer's top bits are all zeroed (i.e. kmer is not 'oversized')\n"
-"    * Checks if more than one kmer is all As i.e. multiple 'AAAAAAAA' kmers\n"
+"  Header checks:\n"
+"    * binary version is 6\n"
+"    * Kmer size is an odd number > 1\n"
+"    * number of bitfields is compatible with kmer size\n"
+"    * number of colours is > 0\n"
+"\n"
+"  Kmer checks:\n"
+"    * each kmer's top bits are all zeroed (i.e. kmer is not 'oversized')\n"
+"    * no more than one kmer is all As i.e. no multiple 'AAAAAAAA' kmers\n"
+"    * each kmer has covg greater than zero in at least one colour\n"
 "\n"
 "  Comments/bugs/requests: <turner.isaac@gmail.com>\n");
 
@@ -487,22 +496,9 @@ int main(int argc, char** argv)
     my_fread(covgs, sizeof(uint32_t), num_of_colours, fh, "kmer covg");
     my_fread(edges, sizeof(char), num_of_colours, fh, "kmer edges");
 
-    // Print?
-    if(print_kmers)
-    {
-      binary_kmer_to_seq(kmer, seq, kmer_size, num_of_bitfields);
-      printf("%s", seq);
-
-      // Print coverages
-      for(i = 0; i < num_of_colours; i++)
-        printf(" %li", (unsigned long)covgs[i]);
-
-      // Print edges
-      for(i = 0; i < num_of_colours; i++)
-        printf(" %s", get_edges_str(edges[i], kmer_colour_edge_str));
-
-      printf("\n");
-    }
+    //
+    // Kmer checks
+    //
 
     // Check top bits of kmer
     if(kmer[0] & top_word_mask)
@@ -534,6 +530,38 @@ int main(int argc, char** argv)
         fprintf(stderr, "Error: more than one all 'A's kmers seen\n");
 
       num_of_all_zero_kmers++;
+    }
+
+    // Check covg is == 0 for all colours
+    char kmer_has_covg = 0;
+
+    for(i = 0; i < num_of_colours; i++)
+      if(covgs[i] > 0)
+        kmer_has_covg = 1;
+
+    if(kmer_has_covg == 0)
+    {
+      if(num_of_zero_covg_kmers == 0)
+        fprintf(stderr, "Error: kmer coverage is zero in all colours\n");
+
+      num_of_zero_covg_kmers++;
+    }
+
+    // Print?
+    if(print_kmers)
+    {
+      binary_kmer_to_seq(kmer, seq, kmer_size, num_of_bitfields);
+      printf("%s", seq);
+
+      // Print coverages
+      for(i = 0; i < num_of_colours; i++)
+        printf(" %li", (unsigned long)covgs[i]);
+
+      // Print edges
+      for(i = 0; i < num_of_colours; i++)
+        printf(" %s", get_edges_str(edges[i], kmer_colour_edge_str));
+
+      printf("\n");
     }
 
     num_of_kmers_read++;

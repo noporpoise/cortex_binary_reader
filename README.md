@@ -26,7 +26,7 @@ Usage
       --print_kmers   Print out each kmer
       --parse_kmers   Parse but don't print kmers [default]
 
-      If no options are specified, '--print_info --parse_kmers' is used
+      If no options are specified '--print_info --parse_kmers' is used
 
       Kmers are printed in the order they are listed in the file. 
       For each kmer we print: <kmer_seq> <covg_in_col0 ...> <edges_in_col0 ...>
@@ -34,12 +34,15 @@ Usage
              means col 0: covg 6 [G]GTAAGTGCCA[T]
                    col 1: covg 4 [C]GTAAGTGCCA[A|T]
 
-      Current Tests:
-        * Checks binary version is 6
-        * Checks kmer size is an odd number > 1
-        * Checks number of bitfields is compatible with kmer size
-        * Checks number of colours is > 0
-        * Checks each kmer's top bits are all zeroed (i.e. kmer is not 'oversized')
-        * Checks if more than one kmer is all As i.e. multiple 'AAAAAAAA' kmers
+      Header checks:
+        * binary version is 6
+        * Kmer size is an odd number > 1
+        * number of bitfields is compatible with kmer size
+        * number of colours is > 0
+
+      Kmer checks:
+        * each kmer's top bits are all zeroed (i.e. kmer is not 'oversized')
+        * no more than one kmer is all As i.e. no multiple 'AAAAAAAA' kmers
+        * each kmer has covg greater than zero in at least one colour
 
       Comments/bugs/requests: <turner.isaac@gmail.com>
