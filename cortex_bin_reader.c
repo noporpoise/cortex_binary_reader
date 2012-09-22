@@ -542,7 +542,7 @@ int main(int argc, char** argv)
     if(kmer_has_covg == 0)
     {
       if(num_of_zero_covg_kmers == 0)
-        fprintf(stderr, "Error: kmer coverage is zero in all colours\n");
+        fprintf(stderr, "Error: a kmer has zero coverage in all colours\n");
 
       num_of_zero_covg_kmers++;
     }
