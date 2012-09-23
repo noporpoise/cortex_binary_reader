@@ -401,10 +401,10 @@ int main(int argc, char** argv)
     else
     {
       cleaning_infos[i].name_of_graph_clean_against
-        = malloc((name_length+1) * sizeof(char));
+        = (char*)malloc((name_length + 1) * sizeof(char));
 
-      my_fread(cleaning_infos + i, sizeof(char), name_length, fh,
-               "graph name length");
+      my_fread(cleaning_infos[i].name_of_graph_clean_against, sizeof(char),
+               name_length, fh, "graph name length");
 
       cleaning_infos[i].name_of_graph_clean_against[name_length] = '\0';
     }
@@ -423,7 +423,8 @@ int main(int argc, char** argv)
       printf("  total sequence loaded: %lu\n", (unsigned long)total_seq_loaded_per_colour[i]);
       printf("  sequence error rate: %Lf\n", seq_error_rates[i]);
 
-      printf("  tip clipping: %s\n", cleaning_infos[i].tip_cleaning ? "yes" : "no");
+      printf("  tip clipping: %s\n",
+             (cleaning_infos[i].tip_cleaning == 0 ? "no" : "yes"));
 
       if(cleaning_infos[i].remove_low_covg_supernodes)
       {
@@ -448,7 +449,8 @@ int main(int argc, char** argv)
       if(cleaning_infos[i].cleaned_against_graph)
       {
         printf("  cleaned against graph: yes [against: '%s']\n",
-               cleaning_infos[i].name_of_graph_clean_against);
+               cleaning_infos[i].name_of_graph_clean_against == NULL
+                 ? "" : cleaning_infos[i].name_of_graph_clean_against);
       }
       else
       {
