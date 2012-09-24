@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
 #include <inttypes.h>
 #include <errno.h>
 
@@ -29,6 +30,9 @@ char print_info = 1;
 char print_kmers = 0;
 char parse_kmers = 1;
 
+// Does this file pass all tests?
+char valid_file = 1;
+
 // Reading stats
 int num_of_kmers_read = 0;
 
@@ -37,21 +41,32 @@ unsigned long num_of_all_zero_kmers = 0;
 unsigned long num_of_oversized_kmers = 0;
 unsigned long num_of_zero_covg_kmers = 0;
 
+void report_error(const char* fmt, ...)
+{
+  valid_file = 0;
+
+  va_list argptr;
+  va_start(argptr, fmt);
+  fprintf(stderr, "Error: ");
+  vfprintf(stderr, fmt, argptr);
+  va_end(argptr);
+}
+
 void print_kmer_stats()
 {
   if(num_of_all_zero_kmers > 1)
-    fprintf(stderr, "Error: %lu all-zero-kmers seen\n", num_of_all_zero_kmers);
+    report_error("%lu all-zero-kmers seen\n", num_of_all_zero_kmers);
 
   if(num_of_oversized_kmers > 0)
-    fprintf(stderr, "Error: %lu oversized kmers seen\n", num_of_oversized_kmers);
+    report_error("%lu oversized kmers seen\n", num_of_oversized_kmers);
 
   if(num_of_zero_covg_kmers > 0)
   {
-    fprintf(stderr, "Error: %lu kmers have no coverage is any colour\n",
-            num_of_zero_covg_kmers);
+    report_error("%lu kmers have no coverage is any colour\n",
+                 num_of_zero_covg_kmers);
   }
 
-  if(print_info || parse_kmers)
+  if((print_kmers || parse_kmers) && print_info)
     printf("kmers read: %lu\n", (unsigned long)num_of_kmers_read);
 }
 
@@ -61,8 +76,10 @@ void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
   size_t read;
   if((read = fread(ptr, size, nitems, stream)) != nitems)
   {
-    fprintf(stderr, "Couldn't read '%s': expected %li; recieved: %li; (exiting...)\n",
-            entry_name, (long)nitems, (long)read);
+    valid_file = 0;
+
+    report_error("Couldn't read '%s': expected %li; recieved: %li; (fatal)\n",
+                 entry_name, (long)nitems, (long)read);
 
     if(print_kmers)
       printf("----\n");
@@ -74,7 +91,7 @@ void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
   int err;
   if((err = ferror(stream)) != 0)
   {
-    fprintf(stderr, "An error occurred on file reading: %i\n", err);
+    report_error("file reading error: %i\n", err);
   }
 }
 
@@ -194,11 +211,15 @@ void print_usage()
 "  several checks to test if binary file is valid. \n"
 "\n"
 "  OPTIONS:\n"
-"  --print_info    Print out header info [default]\n"
-"  --print_kmers   Print out each kmer\n"
-"  --parse_kmers   Parse but don't print kmers [default]\n"
+"  --print_info    Print header info and exit. If used on its own kmers are not\n"
+"                  printed or checked (fast option).\n"
 "\n"
-"  If no options are specified '--print_info --parse_kmers' is used\n"
+"  --print_kmers   Print each kmer. If used on its own, other information\n"
+"                  (i.e. headers) is not printed out\n"
+"\n"
+"  --parse_kmers   Print header info, parse but don't print kmers [default]\n"
+"\n"
+"  If no options are specified '--parse_kmers --print_info' is used.\n"
 "\n"
 "  Kmers are printed in the order they are listed in the file. \n"
 "  For each kmer we print: <kmer_seq> <covg_in_col0 ...> <edges_in_col0 ...>\n"
@@ -241,11 +262,18 @@ int main(int argc, char** argv)
     for(i = 1; i < argc-1; i++)
     {
       if(strcasecmp(argv[i], "--print_info") == 0)
+      {
         print_info = 1;
+      }
       else if(strcasecmp(argv[i], "--print_kmers") == 0)
+      {
         print_kmers = 1;
+      }
       else if(strcasecmp(argv[i], "--parse_kmers") == 0)
+      {
+        print_info = 1;
         parse_kmers = 1;
+      }
       else
         print_usage();
     }
@@ -260,7 +288,7 @@ int main(int argc, char** argv)
 
   if(fh == NULL)
   {
-    fprintf(stderr, "Error: cannot open file '%s'\n", filepath);
+    report_error("cannot open file '%s'\n", filepath);
     exit(EXIT_FAILURE);
   }
 
@@ -318,22 +346,22 @@ int main(int argc, char** argv)
   // Checks
 
   if(version > 6 || version < 4)
-    fprintf(stderr, "Error: Sorry, we only support binary versions 4, 5 & 6\n");
+    report_error("Sorry, we only support binary versions 4, 5 & 6\n");
 
   if(kmer_size % 2 == 0)
-    fprintf(stderr, "Error: kmer size is not an odd number\n");
+    report_error("kmer size is not an odd number\n");
 
   if(kmer_size < 3)
-    fprintf(stderr, "Error: kmer size is less than three\n");
+    report_error("kmer size is less than three\n");
 
   if(num_of_bitfields * 32 < kmer_size)
-    fprintf(stderr, "Error: Not enough bitfields for kmer size\n");
+    report_error("Not enough bitfields for kmer size\n");
 
   if((num_of_bitfields-1)*32 > kmer_size)
-    fprintf(stderr, "Error: using more than the minimum number of bitfields\n");
+    report_error("using more than the minimum number of bitfields\n");
 
   if(num_of_colours == 0)
-    fprintf(stderr, "Error: number of colours is zero\n");
+    report_error("number of colours is zero\n");
 
   //
 
@@ -478,8 +506,7 @@ int main(int argc, char** argv)
 
   if(strcmp(magic_word, "CORTEX") != 0)
   {
-    fprintf(stderr, "Error: magic word doesn't match 'CORTEX' (end): '%s'\n",
-            magic_word);
+    report_error("magic word doesn't match 'CORTEX' (end): '%s'\n", magic_word);
     exit(EXIT_FAILURE);
   }
 
@@ -513,8 +540,8 @@ int main(int argc, char** argv)
   {
     if(chars_read != num_bytes_per_bkmer)
     {
-      fprintf(stderr, "Error: unusual extra bytes [%i] at the end of the file\n",
-              (int)chars_read);
+      report_error("unusual extra bytes [%i] at the end of the file\n",
+                   (int)chars_read);
       break;
     }
 
@@ -530,7 +557,7 @@ int main(int argc, char** argv)
     {
       if(num_of_oversized_kmers == 0)
       {
-        fprintf(stderr, "Error: oversized kmer\n");
+        report_error("oversized kmer\n");
 
         for(i = 0; i < num_of_bitfields; i++)
         {
@@ -552,7 +579,7 @@ int main(int argc, char** argv)
     if(kmer_words_or == 0)
     {
       if(num_of_all_zero_kmers == 1)
-        fprintf(stderr, "Error: more than one all 'A's kmers seen\n");
+        report_error("more than one all 'A's kmers seen\n");
 
       num_of_all_zero_kmers++;
     }
@@ -567,7 +594,7 @@ int main(int argc, char** argv)
     if(kmer_has_covg == 0)
     {
       if(num_of_zero_covg_kmers == 0)
-        fprintf(stderr, "Error: a kmer has zero coverage in all colours\n");
+        report_error("a kmer has zero coverage in all colours\n");
 
       num_of_zero_covg_kmers++;
     }
@@ -595,16 +622,29 @@ int main(int argc, char** argv)
   if(print_kmers && print_info)
     printf("----\n");
 
+  // check for various reading errors
   if(errno != 0)
-    fprintf(stderr, "Error: errno set [%i]\n", (int)errno);
+  {
+    valid_file = 0;
+    report_error("errno set [%i]\n", (int)errno);
+  }
 
   int err;
   if((err = ferror(fh)) != 0)
-    fprintf(stderr, "Error: occurred after file reading [%i]\n", err);
+  {
+    valid_file = 0;
+    report_error("occurred after file reading [%i]\n", err);
+  }
 
   print_kmer_stats();
 
   fclose(fh);
+
+  if((print_kmers || parse_kmers) && print_info && valid_file)
+  {
+    printf("----\n");
+    printf("Binary appears to be valid\n");
+  }
 
   exit(EXIT_SUCCESS);
 }
