@@ -291,17 +291,20 @@ int main(int argc, char** argv)
     exit(EXIT_FAILURE);
   }
 
-  // Read version number
+  // File data
   uint32_t version;
-  my_fread(&version, sizeof(uint32_t), 1, fh, "binary version");
-
   uint32_t kmer_size;
-  my_fread(&kmer_size, sizeof(uint32_t), 1, fh, "kmer size");
-
   uint32_t num_of_bitfields;
-  my_fread(&num_of_bitfields, sizeof(uint32_t), 1, fh, "number of bitfields");
-
   uint32_t num_of_colours;
+  // version 6 only below here
+  char **sample_names = NULL;
+  long double *seq_error_rates = NULL;
+  CleaningInfo *cleaning_infos;
+
+  // Read version number
+  my_fread(&version, sizeof(uint32_t), 1, fh, "binary version");
+  my_fread(&kmer_size, sizeof(uint32_t), 1, fh, "kmer size");
+  my_fread(&num_of_bitfields, sizeof(uint32_t), 1, fh, "number of bitfields");
   my_fread(&num_of_colours, sizeof(uint32_t), 1, fh, "number of colours");
 
   if(print_info)
@@ -314,8 +317,8 @@ int main(int argc, char** argv)
 
   // Checks
 
-  if(version != 6)
-    fprintf(stderr, "Error: binary version is not '6'\n");
+  if(version > 6 || version < 4)
+    fprintf(stderr, "Error: Sorry, we only support binary versions 4, 5 & 6\n");
 
   if(kmer_size % 2 == 0)
     fprintf(stderr, "Error: kmer size is not an odd number\n");
@@ -338,75 +341,77 @@ int main(int argc, char** argv)
   uint32_t *mean_read_lens_per_colour
     = (uint32_t*)malloc(num_of_colours*sizeof(uint32_t));
 
-  my_fread(mean_read_lens_per_colour, sizeof(int), num_of_colours, fh,
+  my_fread(mean_read_lens_per_colour, sizeof(uint32_t), num_of_colours, fh,
            "mean read length for each colour");
 
   // Read array of total seq loaded per colour
   uint64_t *total_seq_loaded_per_colour
     = (uint64_t*)malloc(num_of_colours*sizeof(uint64_t));
 
-  my_fread(total_seq_loaded_per_colour, sizeof(long), num_of_colours, fh,
+  my_fread(total_seq_loaded_per_colour, sizeof(uint64_t), num_of_colours, fh,
            "total sequance loaded for each colour");
 
-
-  char **sample_names = (char**)malloc(sizeof(char*) * num_of_colours);
-
-  for(i = 0; i < num_of_colours; i++)
+  if(version == 6)
   {
-    int str_length;
-    my_fread(&str_length, sizeof(int), 1, fh, "sample name length");
+    sample_names = (char**)malloc(sizeof(char*) * num_of_colours);
 
-    if(str_length == 0)
+    for(i = 0; i < num_of_colours; i++)
     {
-      sample_names[i] = NULL;
+      int str_length;
+      my_fread(&str_length, sizeof(uint32_t), 1, fh, "sample name length");
+
+      if(str_length == 0)
+      {
+        sample_names[i] = NULL;
+      }
+      else
+      {
+        sample_names[i] = (char*)malloc(str_length * sizeof(char)+1);
+        my_fread(sample_names[i], sizeof(char), str_length, fh, "sample name");
+        sample_names[i][str_length] = '\0';
+      }
     }
-    else
+
+    seq_error_rates = malloc(sizeof(long double) * num_of_colours);
+    my_fread(seq_error_rates, sizeof(long double), num_of_colours, fh,
+             "seq error rates");
+
+    cleaning_infos = (CleaningInfo*)malloc(sizeof(CleaningInfo) * num_of_colours);
+
+    for(i = 0; i < num_of_colours; i++)
     {
-      sample_names[i] = (char*)malloc(str_length * sizeof(char)+1);
-      my_fread(sample_names[i], sizeof(char), str_length, fh, "sample name");
-      sample_names[i][str_length] = '\0';
-    }
-  }
+      my_fread(&(cleaning_infos[i].tip_cleaning), sizeof(char), 1, fh,
+               "tip cleaning");
+      my_fread(&(cleaning_infos[i].remove_low_covg_supernodes), sizeof(char), 1, fh,
+               "remove low covg supernodes");
+      my_fread(&(cleaning_infos[i].remove_low_covg_kmers), sizeof(char), 1, fh,
+               "remove low covg kmers");
+      my_fread(&(cleaning_infos[i].cleaned_against_graph), sizeof(char), 1, fh,
+               "cleaned against graph");
 
-  long double *seq_error_rates = malloc(sizeof(long double) * num_of_colours);
-  my_fread(seq_error_rates, sizeof(long double), num_of_colours, fh,
-           "seq error rates");
+      my_fread(&(cleaning_infos[i].remove_low_covg_supernodes_thresh), sizeof(uint32_t),
+               1, fh, "remove low covg supernode threshold");
+    
+      my_fread(&(cleaning_infos[i].remove_low_covg_kmer_thresh), sizeof(uint32_t),
+               1, fh, "remove low covg kmer threshold");
 
-  CleaningInfo *cleaning_infos = (CleaningInfo*)malloc(sizeof(CleaningInfo) * num_of_colours);
+      uint32_t name_length;
+      my_fread(&name_length, sizeof(uint32_t), 1, fh, "graph name length");
 
-  for(i = 0; i < num_of_colours; i++)
-  {
-    my_fread(&(cleaning_infos[i].tip_cleaning), sizeof(char), 1, fh,
-             "tip cleaning");
-    my_fread(&(cleaning_infos[i].remove_low_covg_supernodes), sizeof(char), 1, fh,
-             "remove low covg supernodes");
-    my_fread(&(cleaning_infos[i].remove_low_covg_kmers), sizeof(char), 1, fh,
-             "remove low covg kmers");
-    my_fread(&(cleaning_infos[i].cleaned_against_graph), sizeof(char), 1, fh,
-             "cleaned against graph");
+      if(name_length == 0)
+      {
+        cleaning_infos[i].name_of_graph_clean_against = NULL;
+      }
+      else
+      {
+        cleaning_infos[i].name_of_graph_clean_against
+          = (char*)malloc((name_length + 1) * sizeof(char));
 
-    my_fread(&(cleaning_infos[i].remove_low_covg_supernodes_thresh), sizeof(uint32_t),
-             1, fh, "remove low covg supernode threshold");
-  
-    my_fread(&(cleaning_infos[i].remove_low_covg_kmer_thresh), sizeof(uint32_t),
-             1, fh, "remove low covg kmer threshold");
+        my_fread(cleaning_infos[i].name_of_graph_clean_against, sizeof(char),
+                 name_length, fh, "graph name length");
 
-    uint32_t name_length;
-    my_fread(&name_length, sizeof(uint32_t), 1, fh, "graph name length");
-
-    if(name_length == 0)
-    {
-      cleaning_infos[i].name_of_graph_clean_against = NULL;
-    }
-    else
-    {
-      cleaning_infos[i].name_of_graph_clean_against
-        = (char*)malloc((name_length + 1) * sizeof(char));
-
-      my_fread(cleaning_infos[i].name_of_graph_clean_against, sizeof(char),
-               name_length, fh, "graph name length");
-
-      cleaning_infos[i].name_of_graph_clean_against[name_length] = '\0';
+        cleaning_infos[i].name_of_graph_clean_against[name_length] = '\0';
+      }
     }
   }
 
@@ -418,43 +423,50 @@ int main(int argc, char** argv)
     {
       printf("-- Colour %i --\n", i);
 
-      printf("  sample name: '%s'\n", sample_names[i]);
+      if(version == 6)
+        printf("  sample name: '%s'\n", sample_names[i]);
+
       printf("  mean read length: %u\n", (unsigned int)mean_read_lens_per_colour[i]);
       printf("  total sequence loaded: %lu\n", (unsigned long)total_seq_loaded_per_colour[i]);
-      printf("  sequence error rate: %Lf\n", seq_error_rates[i]);
+      
+      if(version == 6)
+      {
+        // Version 6 only output
+        printf("  sequence error rate: %Lf\n", seq_error_rates[i]);
 
-      printf("  tip clipping: %s\n",
-             (cleaning_infos[i].tip_cleaning == 0 ? "no" : "yes"));
+        printf("  tip clipping: %s\n",
+               (cleaning_infos[i].tip_cleaning == 0 ? "no" : "yes"));
 
-      if(cleaning_infos[i].remove_low_covg_supernodes)
-      {
-        printf("  remove_low_coverage_supernodes: yes [threshold: %i]\n",
-               cleaning_infos[i].remove_low_covg_supernodes_thresh);
-      }
-      else
-      {
-        printf("  remove_low_coverage_supernodes: no\n");
-      }
+        if(cleaning_infos[i].remove_low_covg_supernodes)
+        {
+          printf("  remove_low_coverage_supernodes: yes [threshold: %i]\n",
+                 cleaning_infos[i].remove_low_covg_supernodes_thresh);
+        }
+        else
+        {
+          printf("  remove_low_coverage_supernodes: no\n");
+        }
 
-      if(cleaning_infos[i].remove_low_covg_kmers)
-      {
-        printf("  remove_low_coverage_kmers: yes [threshold: %i]\n",
-               cleaning_infos[i].remove_low_covg_kmer_thresh);
-      }
-      else
-      {
-        printf("  remove_low_coverage_kmers: no\n");
-      }
+        if(cleaning_infos[i].remove_low_covg_kmers)
+        {
+          printf("  remove_low_coverage_kmers: yes [threshold: %i]\n",
+                 cleaning_infos[i].remove_low_covg_kmer_thresh);
+        }
+        else
+        {
+          printf("  remove_low_coverage_kmers: no\n");
+        }
 
-      if(cleaning_infos[i].cleaned_against_graph)
-      {
-        printf("  cleaned against graph: yes [against: '%s']\n",
-               cleaning_infos[i].name_of_graph_clean_against == NULL
-                 ? "" : cleaning_infos[i].name_of_graph_clean_against);
-      }
-      else
-      {
-        printf("  cleaned against graph: no\n");
+        if(cleaning_infos[i].cleaned_against_graph)
+        {
+          printf("  cleaned against graph: yes [against: '%s']\n",
+                 cleaning_infos[i].name_of_graph_clean_against == NULL
+                   ? "" : cleaning_infos[i].name_of_graph_clean_against);
+        }
+        else
+        {
+          printf("  cleaned against graph: no\n");
+        }
       }
     }
 
