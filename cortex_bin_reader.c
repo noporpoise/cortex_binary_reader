@@ -30,11 +30,21 @@ char print_info = 1;
 char print_kmers = 0;
 char parse_kmers = 1;
 
+// File data
+uint32_t version;
+uint32_t kmer_size;
+uint32_t num_of_bitfields;
+uint32_t num_of_colours;
+// version 6 only below here
+char **sample_names = NULL;
+long double *seq_error_rates = NULL;
+CleaningInfo *cleaning_infos = NULL;
+
 // Does this file pass all tests?
 char valid_file = 1;
 
 // Reading stats
-int num_of_kmers_read = 0;
+unsigned long num_of_kmers_read = 0;
 
 // Checks
 unsigned long num_of_all_zero_kmers = 0;
@@ -52,6 +62,87 @@ void report_error(const char* fmt, ...)
   va_end(argptr);
 }
 
+unsigned long round_up_ulong(unsigned long num, unsigned long nearest)
+{
+  return nearest * ((num + nearest - 1) / nearest);
+}
+
+unsigned int num_of_digits(unsigned long num)
+{
+  unsigned long digits;
+
+  for(digits = 1; num > 10; digits++)
+    num /= 10;
+
+  return digits;
+}
+
+void print_long_to_str(unsigned long num, char* result)
+{
+  int digits = num_of_digits(num);
+  int num_commas = (digits-1) / 3;
+
+  int i;
+  char *p = result + digits + num_commas;
+
+  *p = '\0';
+  p--;
+
+  for(i = 0; i < digits; i++)
+  {
+    if(i > 0 && i % 3 == 0)
+    {
+      *p = ',';
+      p--;
+    }
+
+    *p = '0' + (num % 10);
+    p--;
+    num /= 10;
+  }
+}
+
+void print_long(unsigned long num)
+{
+  char str[20];
+  print_long_to_str(num, str);
+  printf("%s", str);
+}
+
+// Remember to free the result!
+char* bytes_to_str(unsigned long num)
+{
+  unsigned int num_of_units = 6;
+  char *units[] = {"B", "KB", "MB", "GB", "TB", "PB"};
+
+  unsigned long unit;
+  unsigned long num_cpy = num;
+
+  for(unit = 0; num_cpy >= 1024 && unit < num_of_units; unit++)
+    num_cpy /= 1024;
+
+  unsigned long bytes_in_unit = (unsigned long)0x1 << (10 * unit);
+  long double num_double = (long double)num / bytes_in_unit;
+
+  size_t bytes_for_num = num_of_digits((unsigned long)num_double)+2;
+
+  char *result = malloc(bytes_for_num+1+strlen(units[unit])+1);
+  sprintf(result, "%.1Lf %s", num_double, units[unit]);
+
+  return result;
+}
+
+
+char* memory_required(unsigned long num_of_hash_entries)
+{
+  // Size of each entry is rounded up to nearest 8 bytes
+  unsigned long num_of_bytes
+    = num_of_hash_entries *
+      round_up_ulong(8*num_of_bitfields + 5*num_of_colours + 1, 8);
+
+  return bytes_to_str(num_of_bytes);
+}
+
 void print_kmer_stats()
 {
   if(num_of_all_zero_kmers > 1)
@@ -67,7 +158,45 @@ void print_kmer_stats()
   }
 
   if((print_kmers || parse_kmers) && print_info)
-    printf("kmers read: %lu\n", (unsigned long)num_of_kmers_read);
+  {
+    printf("kmers read: ");
+    print_long(num_of_kmers_read);
+    printf("\n");
+
+    // Aim for 80% occupancy once loaded
+    float extra_space = 10.0/8;
+    unsigned long hash_capacity = extra_space * num_of_kmers_read;
+
+    unsigned long mem_width = 32;
+
+    // Calculate mem_width
+    // 0x1 << x == 2^x
+    unsigned long mem_height
+      = hash_capacity / ((unsigned long)0x1 << mem_width) + 1;
+
+    if(mem_height == 1)
+    {
+      // reduce mem_width
+      while(mem_width > 1 && (uint64_t)0x1 << (mem_width-1) > hash_capacity)
+        mem_width--;
+    }
+
+    unsigned long rec_hash_entries = ((unsigned long)0x1 << mem_width) * mem_height;
+
+    char* min_mem_required = memory_required(num_of_kmers_read);
+    char* rec_mem_required = memory_required(rec_hash_entries);
+
+    printf("Memory required: %s memory\n", min_mem_required);
+    printf("Memory suggested: --mem_width %lu --mem_height %lu\n",
+           mem_width, mem_height);
+
+    printf("  [");
+    print_long(rec_hash_entries);
+    printf(" entries; %s memory]\n", rec_mem_required);
+
+    free(min_mem_required);
+    free(rec_mem_required);
+  }
 }
 
 void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
@@ -319,16 +448,6 @@ int main(int argc, char** argv)
     exit(EXIT_FAILURE);
   }
 
-  // File data
-  uint32_t version;
-  uint32_t kmer_size;
-  uint32_t num_of_bitfields;
-  uint32_t num_of_colours;
-  // version 6 only below here
-  char **sample_names = NULL;
-  long double *seq_error_rates = NULL;
-  CleaningInfo *cleaning_infos;
-
   // Read version number
   my_fread(&version, sizeof(uint32_t), 1, fh, "binary version");
   my_fread(&kmer_size, sizeof(uint32_t), 1, fh, "kmer size");
@@ -557,7 +676,7 @@ int main(int argc, char** argv)
     {
       if(num_of_oversized_kmers == 0)
       {
-        report_error("oversized kmer\n");
+        report_error("oversized kmer [index: %lu]\n", num_of_kmers_read);
 
         for(i = 0; i < num_of_bitfields; i++)
         {
@@ -579,7 +698,10 @@ int main(int argc, char** argv)
     if(kmer_words_or == 0)
     {
       if(num_of_all_zero_kmers == 1)
-        report_error("more than one all 'A's kmers seen\n");
+      {
+        report_error("more than one all 'A's kmers seen [index: %lu]\n",
+                     num_of_kmers_read);
+      }
 
       num_of_all_zero_kmers++;
     }
@@ -594,7 +716,10 @@ int main(int argc, char** argv)
     if(kmer_has_covg == 0)
     {
       if(num_of_zero_covg_kmers == 0)
-        report_error("a kmer has zero coverage in all colours\n");
+      {
+        report_error("a kmer has zero coverage in all colours [index: %lu]\n",
+                     num_of_kmers_read);
+      }
 
       num_of_zero_covg_kmers++;
     }
@@ -635,6 +760,10 @@ int main(int argc, char** argv)
     valid_file = 0;
     report_error("occurred after file reading [%i]\n", err);
   }
+
+  // For testing output
+  //num_of_bitfields = 2;
+  //num_of_kmers_read = 3600000000;
 
   print_kmer_stats();
 
