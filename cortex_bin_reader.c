@@ -163,25 +163,34 @@ void print_kmer_stats()
     print_long(num_of_kmers_read);
     printf("\n");
 
+    // Number of buckets is 2^mem_height * mem_width
     // Aim for 80% occupancy once loaded
     float extra_space = 10.0/8;
     unsigned long hash_capacity = extra_space * num_of_kmers_read;
 
-    unsigned long mem_width = 32;
+    unsigned long mem_height = 32;
 
     // Calculate mem_width
-    // 0x1 << x == 2^x
-    unsigned long mem_height
-      = hash_capacity / ((unsigned long)0x1 << mem_width) + 1;
+    // (0x1 << x) is the same as: 2^x
+    unsigned long mem_width
+      = hash_capacity / ((unsigned long)0x1 << mem_height) + 1;
 
-    if(mem_height == 1)
+    if(mem_width == 1)
     {
-      // reduce mem_width
-      while(mem_width > 1 && (uint64_t)0x1 << (mem_width-1) > hash_capacity)
-        mem_width--;
+      // reduce mem_height
+      while(mem_height > 1 && (uint64_t)0x1 << (mem_height-1) > hash_capacity)
+        mem_height--;
+
+      /*
+      while(mem_height > 1 && (uint64_t)0x1 << mem_height > hash_capacity)
+        mem_height--;
+    
+      // Increase mem_width until we have max 80% occupancy
+      mem_width = hash_capacity / ((unsigned long)0x1 << mem_height) + 1;
+      */
     }
 
-    unsigned long rec_hash_entries = ((unsigned long)0x1 << mem_width) * mem_height;
+    unsigned long rec_hash_entries = ((unsigned long)0x1 << mem_height) * mem_width;
 
     char* min_mem_required = memory_required(num_of_kmers_read);
     char* rec_mem_required = memory_required(rec_hash_entries);
@@ -764,6 +773,8 @@ int main(int argc, char** argv)
   // For testing output
   //num_of_bitfields = 2;
   //num_of_kmers_read = 3600000000;
+
+  //num_of_kmers_read = 3581787;
 
   print_kmer_stats();
 
