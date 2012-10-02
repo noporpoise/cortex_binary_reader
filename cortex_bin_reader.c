@@ -4,6 +4,10 @@
 #include <stdarg.h>
 #include <inttypes.h>
 #include <errno.h>
+#include <math.h>
+
+#define MIN(x,y) ((x) <= (y) ? (x) : (y))
+#define MAX(x,y) ((x) >= (y) ? (x) : (y))
 
 typedef struct
 {
@@ -112,8 +116,8 @@ void print_long(unsigned long num)
 // Remember to free the result!
 char* bytes_to_str(unsigned long num)
 {
-  unsigned int num_of_units = 6;
-  char *units[] = {"B", "KB", "MB", "GB", "TB", "PB"};
+  unsigned int num_of_units = 7;
+  char *units[] = {"B", "KB", "MB", "GB", "TB", "PB", "EB"};
 
   unsigned long unit;
   unsigned long num_cpy = num;
@@ -121,9 +125,10 @@ char* bytes_to_str(unsigned long num)
   for(unit = 0; num_cpy >= 1024 && unit < num_of_units; unit++)
     num_cpy /= 1024;
 
-  unsigned long bytes_in_unit = (unsigned long)0x1 << (10 * unit);
+  unsigned long bytes_in_unit = 0x1UL << (10 * unit);
   long double num_double = (long double)num / bytes_in_unit;
 
+  // +2 for decimal point and single decimal place
   size_t bytes_for_num = num_of_digits((unsigned long)num_double)+2;
 
   char *result = malloc(bytes_for_num+1+strlen(units[unit])+1);
@@ -163,44 +168,48 @@ void print_kmer_stats()
     print_long(num_of_kmers_read);
     printf("\n");
 
-    // Number of buckets is 2^mem_height * mem_width
+    // Memory calculations
+
+    // Number of hash table entries is 2^mem_height * mem_width
     // Aim for 80% occupancy once loaded
     float extra_space = 10.0/8;
     unsigned long hash_capacity = extra_space * num_of_kmers_read;
 
-    unsigned long mem_height = 32;
+    // mem_width must be within these boundaries
+    unsigned int min_mem_width = 5;
+    unsigned int max_mem_width = 50;
+    unsigned int min_mem_height = 12;
+    // min mem usage = 2^12 * 5 = 20,480 entries = 320.0 KB with k=31,cols=1
 
-    // Calculate mem_width
-    // (0x1 << x) is the same as: 2^x
-    unsigned long mem_width
-      = hash_capacity / ((unsigned long)0x1 << mem_height) + 1;
+    unsigned long mem_height, mem_width, hash_entries;
 
-    if(mem_width == 1)
+    mem_height = log2((long double)hash_capacity / (max_mem_width-1))+0.99;
+    mem_height = MIN(mem_height, 32);
+    mem_height = MAX(mem_height, min_mem_height);
+
+    mem_width = hash_capacity / (0x1UL << mem_height) + 1;
+
+    if(mem_width < min_mem_width)
     {
-      // reduce mem_height
-      while(mem_height > 1 && (uint64_t)0x1 << (mem_height-1) > hash_capacity)
-        mem_height--;
-
-      /*
-      while(mem_height > 1 && (uint64_t)0x1 << mem_height > hash_capacity)
-        mem_height--;
-    
-      // Increase mem_width until we have max 80% occupancy
-      mem_width = hash_capacity / ((unsigned long)0x1 << mem_height) + 1;
-      */
+      // re-calculate mem_height
+      mem_height = log2((long double)hash_capacity / min_mem_width)+0.99;
+      mem_height = MIN(mem_height, 32);
+      mem_height = MAX(mem_height, min_mem_height);
+      mem_width = hash_capacity / (0x1UL << mem_height) + 1;
+      mem_width = MAX(mem_width, min_mem_width);
     }
 
-    unsigned long rec_hash_entries = ((unsigned long)0x1 << mem_height) * mem_width;
+    hash_entries = (0x1UL << mem_height) * mem_width;
 
     char* min_mem_required = memory_required(num_of_kmers_read);
-    char* rec_mem_required = memory_required(rec_hash_entries);
+    char* rec_mem_required = memory_required(hash_entries);
 
     printf("Memory required: %s memory\n", min_mem_required);
     printf("Memory suggested: --mem_width %lu --mem_height %lu\n",
            mem_width, mem_height);
 
     printf("  [");
-    print_long(rec_hash_entries);
+    print_long(hash_entries);
     printf(" entries; %s memory]\n", rec_mem_required);
 
     free(min_mem_required);
@@ -773,7 +782,7 @@ int main(int argc, char** argv)
   // For testing output
   //num_of_bitfields = 2;
   //num_of_kmers_read = 3600000000;
-
+  //num_of_kmers_read = 12345;
   //num_of_kmers_read = 3581787;
 
   print_kmer_stats();
