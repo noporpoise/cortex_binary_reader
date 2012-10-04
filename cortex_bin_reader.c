@@ -522,7 +522,7 @@ int main(int argc, char** argv)
 
     for(i = 0; i < num_of_colours; i++)
     {
-      int str_length;
+      size_t str_length;
       my_fread(&str_length, sizeof(uint32_t), 1, fh, "sample name length");
 
       if(str_length == 0)
@@ -531,9 +531,20 @@ int main(int argc, char** argv)
       }
       else
       {
-        sample_names[i] = (char*)malloc(str_length * sizeof(char)+1);
+        sample_names[i] = (char*)malloc((str_length+1) * sizeof(char));
         my_fread(sample_names[i], sizeof(char), str_length, fh, "sample name");
         sample_names[i][str_length] = '\0';
+
+        // Check sample length is as long as we were told
+        size_t sample_name_len = strlen(sample_names[i]);
+
+        if(sample_name_len != str_length)
+        {
+          // Premature \0 in string
+          report_error("Sample %i name has length %u but is only %u chars long "
+                       "(premature '\\0')",
+                       i, str_length, sample_name_len);
+        }
       }
     }
 
@@ -576,6 +587,18 @@ int main(int argc, char** argv)
                  name_length, fh, "graph name length");
 
         cleaning_infos[i].name_of_graph_clean_against[name_length] = '\0';
+      
+        // Check sample length is as long as we were told
+        size_t cleaned_name_len
+          = strlen(cleaning_infos[i].name_of_graph_clean_against);
+
+        if(cleaned_name_len != name_length)
+        {
+          // Premature \0 in string
+          report_error("Sample [%i] cleaned-against-name has length %u but is "
+                       "only %u chars long (premature '\\0')",
+                       i, name_length, cleaned_name_len);
+        }
       }
     }
   }
