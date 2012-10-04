@@ -542,7 +542,7 @@ int main(int argc, char** argv)
         {
           // Premature \0 in string
           report_error("Sample %i name has length %u but is only %u chars long "
-                       "(premature '\\0')",
+                       "(premature '\\0')\n",
                        i, str_length, sample_name_len);
         }
       }
@@ -596,7 +596,7 @@ int main(int argc, char** argv)
         {
           // Premature \0 in string
           report_error("Sample [%i] cleaned-against-name has length %u but is "
-                       "only %u chars long (premature '\\0')",
+                       "only %u chars long (premature '\\0')\n",
                        i, name_length, cleaned_name_len);
         }
       }
