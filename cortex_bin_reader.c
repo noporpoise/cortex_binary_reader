@@ -1,13 +1,14 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <string.h>
 #include <stdarg.h>
 #include <inttypes.h>
 #include <errno.h>
 #include <math.h>
 
-#define MIN(x,y) ((x) <= (y) ? (x) : (y))
-#define MAX(x,y) ((x) >= (y) ? (x) : (y))
+#define MIN2(x,y) ((x) <= (y) ? (x) : (y))
+#define MAX2(x,y) ((x) >= (y) ? (x) : (y))
 
 typedef struct
 {
@@ -29,20 +30,33 @@ typedef enum
   Undefined = 4,
 } Nucleotide;
 
+//
+// What should we do
+//
 // Are we printing kmers?
 char print_info = 1;
 char print_kmers = 0;
 char parse_kmers = 1;
 
+//
 // File data
+//
 uint32_t version;
 uint32_t kmer_size;
 uint32_t num_of_bitfields;
 uint32_t num_of_colours;
+
 // version 6 only below here
 char **sample_names = NULL;
 long double *seq_error_rates = NULL;
 CleaningInfo *cleaning_infos = NULL;
+
+//
+// Data about file contents
+//
+off_t file_size;
+size_t num_bytes_read = 0;
+unsigned long expected_num_kmers = 0;
 
 // Does this file pass all tests?
 char valid_file = 1;
@@ -81,6 +95,7 @@ unsigned int num_of_digits(unsigned long num)
   return digits;
 }
 
+// result must be long enough for result + 1 ('\0')
 void print_long_to_str(unsigned long num, char* result)
 {
   int digits = num_of_digits(num);
@@ -114,25 +129,26 @@ void print_long(unsigned long num)
 }
 
 // Remember to free the result!
-char* bytes_to_str(unsigned long num)
+char* bytes_to_str(unsigned long num, int decimals)
 {
-  unsigned int num_of_units = 7;
+  const unsigned int num_unit_sizes = 7;
   char *units[] = {"B", "KB", "MB", "GB", "TB", "PB", "EB"};
 
   unsigned long unit;
   unsigned long num_cpy = num;
 
-  for(unit = 0; num_cpy >= 1024 && unit < num_of_units; unit++)
+  for(unit = 0; num_cpy >= 1024 && unit < num_unit_sizes; unit++)
     num_cpy /= 1024;
 
   unsigned long bytes_in_unit = 0x1UL << (10 * unit);
-  long double num_double = (long double)num / bytes_in_unit;
+  long double num_of_units = (long double)num / bytes_in_unit;
 
   // +2 for decimal point and single decimal place
-  size_t bytes_for_num = num_of_digits((unsigned long)num_double)+2;
+  size_t bytes_for_num = num_of_digits((unsigned long)num_of_units)+2;
 
   char *result = malloc(bytes_for_num+1+strlen(units[unit])+1);
-  sprintf(result, "%.1Lf %s", num_double, units[unit]);
+
+  sprintf(result, "%.*Lf %s", decimals, num_of_units, units[unit]);
 
   return result;
 }
@@ -145,7 +161,20 @@ char* memory_required(unsigned long num_of_hash_entries)
     = num_of_hash_entries *
       round_up_ulong(8*num_of_bitfields + 5*num_of_colours + 1, 8);
 
-  return bytes_to_str(num_of_bytes);
+  return bytes_to_str(num_of_bytes, 1);
+}
+
+off_t get_file_size(char* filepath)
+{
+  struct stat st;
+
+  if (stat(filepath, &st) == 0)
+      return st.st_size;
+
+  fprintf(stderr, "Error: Cannot determine size of %s: %s\n",
+          filepath, strerror(errno));
+
+  return -1;
 }
 
 void print_kmer_stats()
@@ -167,13 +196,19 @@ void print_kmer_stats()
     printf("kmers read: ");
     print_long(num_of_kmers_read);
     printf("\n");
+  }
 
+  if(print_info)
+  {
     // Memory calculations
+    // use expected number of kmers if we haven't read the whole file
+    unsigned long kmer_count
+      = (print_kmers || parse_kmers ? num_of_kmers_read : expected_num_kmers);
 
     // Number of hash table entries is 2^mem_height * mem_width
     // Aim for 80% occupancy once loaded
     float extra_space = 10.0/8;
-    unsigned long hash_capacity = extra_space * num_of_kmers_read;
+    unsigned long hash_capacity = extra_space * kmer_count;
 
     // mem_width must be within these boundaries
     unsigned int min_mem_width = 5;
@@ -184,8 +219,8 @@ void print_kmer_stats()
     unsigned long mem_height, mem_width, hash_entries;
 
     mem_height = log2((long double)hash_capacity / (max_mem_width-1))+0.99;
-    mem_height = MIN(mem_height, 32);
-    mem_height = MAX(mem_height, min_mem_height);
+    mem_height = MIN2(mem_height, 32);
+    mem_height = MAX2(mem_height, min_mem_height);
 
     mem_width = hash_capacity / (0x1UL << mem_height) + 1;
 
@@ -193,15 +228,15 @@ void print_kmer_stats()
     {
       // re-calculate mem_height
       mem_height = log2((long double)hash_capacity / min_mem_width)+0.99;
-      mem_height = MIN(mem_height, 32);
-      mem_height = MAX(mem_height, min_mem_height);
+      mem_height = MIN2(mem_height, 32);
+      mem_height = MAX2(mem_height, min_mem_height);
       mem_width = hash_capacity / (0x1UL << mem_height) + 1;
-      mem_width = MAX(mem_width, min_mem_width);
+      mem_width = MAX2(mem_width, min_mem_width);
     }
 
     hash_entries = (0x1UL << mem_height) * mem_width;
 
-    char* min_mem_required = memory_required(num_of_kmers_read);
+    char* min_mem_required = memory_required(kmer_count);
     char* rec_mem_required = memory_required(hash_entries);
 
     printf("Memory required: %s memory\n", min_mem_required);
@@ -220,11 +255,11 @@ void print_kmer_stats()
 void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
               char* entry_name)
 {
-  size_t read;
-  if((read = fread(ptr, size, nitems, stream)) != nitems)
-  {
-    valid_file = 0;
+  size_t read = fread(ptr, size, nitems, stream);
+  num_bytes_read += read * size;
 
+  if(read != nitems)
+  {
     report_error("Couldn't read '%s': expected %li; recieved: %li; (fatal)\n",
                  entry_name, (long)nitems, (long)read);
 
@@ -431,12 +466,21 @@ int main(int argc, char** argv)
   if(print_info)
     printf("Loading file: %s\n", filepath);
 
+  file_size = get_file_size(filepath);
+
   FILE* fh = fopen(filepath, "r");
 
   if(fh == NULL)
   {
     report_error("cannot open file '%s'\n", filepath);
     exit(EXIT_FAILURE);
+  }
+
+  if(file_size != -1 && print_info)
+  {
+    char* str = bytes_to_str(file_size, 0);
+    printf("File size: %s\n", str);
+    free(str);
   }
 
   /*
@@ -522,7 +566,7 @@ int main(int argc, char** argv)
 
     for(i = 0; i < num_of_colours; i++)
     {
-      size_t str_length;
+      uint32_t str_length;
       my_fread(&str_length, sizeof(uint32_t), 1, fh, "sample name length");
 
       if(str_length == 0)
@@ -541,7 +585,7 @@ int main(int argc, char** argv)
         if(sample_name_len != str_length)
         {
           // Premature \0 in string
-          report_error("Sample %i name has length %u but is only %u chars long "
+          report_error("Sample %i name has length %lu but is only %lu chars long "
                        "(premature '\\0')\n",
                        i, str_length, sample_name_len);
         }
@@ -556,20 +600,20 @@ int main(int argc, char** argv)
 
     for(i = 0; i < num_of_colours; i++)
     {
-      my_fread(&(cleaning_infos[i].tip_cleaning), sizeof(char), 1, fh,
-               "tip cleaning");
-      my_fread(&(cleaning_infos[i].remove_low_covg_supernodes), sizeof(char), 1, fh,
-               "remove low covg supernodes");
-      my_fread(&(cleaning_infos[i].remove_low_covg_kmers), sizeof(char), 1, fh,
-               "remove low covg kmers");
-      my_fread(&(cleaning_infos[i].cleaned_against_graph), sizeof(char), 1, fh,
-               "cleaned against graph");
+      my_fread(&(cleaning_infos[i].tip_cleaning), sizeof(char), 1,
+               fh, "tip cleaning");
+      my_fread(&(cleaning_infos[i].remove_low_covg_supernodes), sizeof(char), 1,
+               fh, "remove low covg supernodes");
+      my_fread(&(cleaning_infos[i].remove_low_covg_kmers), sizeof(char), 1,
+               fh, "remove low covg kmers");
+      my_fread(&(cleaning_infos[i].cleaned_against_graph), sizeof(char), 1,
+               fh, "cleaned against graph");
 
-      my_fread(&(cleaning_infos[i].remove_low_covg_supernodes_thresh), sizeof(uint32_t),
-               1, fh, "remove low covg supernode threshold");
+      my_fread(&(cleaning_infos[i].remove_low_covg_supernodes_thresh),
+               sizeof(uint32_t), 1, fh, "remove low covg supernode threshold");
     
-      my_fread(&(cleaning_infos[i].remove_low_covg_kmer_thresh), sizeof(uint32_t),
-               1, fh, "remove low covg kmer threshold");
+      my_fread(&(cleaning_infos[i].remove_low_covg_kmer_thresh),
+               sizeof(uint32_t), 1, fh, "remove low covg kmer threshold");
 
       uint32_t name_length;
       my_fread(&name_length, sizeof(uint32_t), 1, fh, "graph name length");
@@ -612,10 +656,15 @@ int main(int argc, char** argv)
       printf("-- Colour %i --\n", i);
 
       if(version == 6)
+      {
+        // Version 6 only output
         printf("  sample name: '%s'\n", sample_names[i]);
+      }
 
-      printf("  mean read length: %u\n", (unsigned int)mean_read_lens_per_colour[i]);
-      printf("  total sequence loaded: %lu\n", (unsigned long)total_seq_loaded_per_colour[i]);
+      printf("  mean read length: %u\n",
+             (unsigned int)mean_read_lens_per_colour[i]);
+      printf("  total sequence loaded: %lu\n",
+             (unsigned long)total_seq_loaded_per_colour[i]);
       
       if(version == 6)
       {
@@ -648,8 +697,8 @@ int main(int argc, char** argv)
         if(cleaning_infos[i].cleaned_against_graph)
         {
           printf("  cleaned against graph: yes [against: '%s']\n",
-                 cleaning_infos[i].name_of_graph_clean_against == NULL
-                   ? "" : cleaning_infos[i].name_of_graph_clean_against);
+                 (cleaning_infos[i].name_of_graph_clean_against == NULL
+                    ? "" : cleaning_infos[i].name_of_graph_clean_against));
         }
         else
         {
@@ -670,9 +719,36 @@ int main(int argc, char** argv)
     exit(EXIT_FAILURE);
   }
 
+  // Calculate number of kmers
+  if(file_size != -1)
+  {
+    size_t bytes_remaining = file_size - num_bytes_read;
+    size_t num_bytes_per_kmer = sizeof(uint64_t) * num_of_bitfields +
+                                sizeof(uint32_t) * num_of_colours +
+                                sizeof(char) * num_of_colours;
+
+    expected_num_kmers = bytes_remaining / num_bytes_per_kmer;
+
+    if(print_info)
+    {
+      printf("Expected number of kmers: %lu\n", expected_num_kmers);
+    }
+
+    size_t excess = bytes_remaining - (expected_num_kmers * num_bytes_per_kmer);
+
+    if(excess > 0)
+    {
+      report_error("Excess bytes. Bytes:\n  file size: %lu;\n  for kmers: %lu;"
+                   "\n  num kmers: %lu;\n  per kmer: %lu;\n  excess: %lu\n",
+                   file_size, bytes_remaining, expected_num_kmers,
+                   num_bytes_per_kmer, excess);
+    }
+  }
+
   // Finished parsing header
   if(!parse_kmers && !print_kmers)
   {
+    print_kmer_stats();
     fclose(fh);
     exit(EXIT_SUCCESS);
   }
@@ -690,18 +766,20 @@ int main(int argc, char** argv)
   int bits_in_top_word = 2 * (kmer_size % 32);
   uint64_t top_word_mask = (~(uint64_t)0) << bits_in_top_word;
 
-  // Read kmer in bytes so we can see if there are extra bytes at the end of
-  // the file
-  size_t chars_read;
-
   size_t num_bytes_per_bkmer = sizeof(uint64_t)*num_of_bitfields;
 
-  while((chars_read = fread(kmer, 1, num_bytes_per_bkmer, fh)) > 0)
+  // Read kmer in bytes so we can see if there are extra bytes at the end of
+  // the file
+  size_t bytes_read;
+
+  while((bytes_read = fread(kmer, 1, num_bytes_per_bkmer, fh)) > 0)
   {
-    if(chars_read != num_bytes_per_bkmer)
+    num_bytes_read += bytes_read * num_bytes_per_bkmer;
+
+    if(bytes_read != num_bytes_per_bkmer)
     {
       report_error("unusual extra bytes [%i] at the end of the file\n",
-                   (int)chars_read);
+                   (int)bytes_read);
       break;
     }
 
@@ -785,20 +863,24 @@ int main(int argc, char** argv)
     num_of_kmers_read++;
   }
 
+  if(num_of_kmers_read != expected_num_kmers)
+  {
+    report_error("Expected %lu kmers, read %lu\n",
+                 num_of_kmers_read, expected_num_kmers);
+  }
+
   if(print_kmers && print_info)
     printf("----\n");
 
   // check for various reading errors
   if(errno != 0)
   {
-    valid_file = 0;
     report_error("errno set [%i]\n", (int)errno);
   }
 
   int err;
   if((err = ferror(fh)) != 0)
   {
-    valid_file = 0;
     report_error("occurred after file reading [%i]\n", err);
   }
 
