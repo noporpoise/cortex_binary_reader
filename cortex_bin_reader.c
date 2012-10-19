@@ -87,16 +87,18 @@ unsigned long round_up_ulong(unsigned long num, unsigned long nearest)
 
 unsigned int num_of_digits(unsigned long num)
 {
-  unsigned long digits;
+  unsigned int digits;
 
-  for(digits = 1; num > 10; digits++)
+  for(digits = 1; num >= 10; digits++)
     num /= 10;
 
   return digits;
 }
 
-// result must be long enough for result + 1 ('\0')
-void print_long_to_str(unsigned long num, char* result)
+// result must be long enough for result + 1 ('\0'). Max length required is:
+// strlen('18,446,744,073,709,551,615')+1 = 27
+// returns pointer to result
+char* ulong_to_str(unsigned long num, char* result)
 {
   int digits = num_of_digits(num);
   int num_commas = (digits-1) / 3;
@@ -119,17 +121,60 @@ void print_long_to_str(unsigned long num, char* result)
     p--;
     num /= 10;
   }
+
+  return result;
 }
 
-void print_long(unsigned long num)
+// result must be long enough for result + 1 ('\0'). Max length required is:
+// strlen('-9,223,372,036,854,775,808')+1 = 27
+char* long_to_str(long num, char* result)
 {
-  char str[20];
-  print_long_to_str(num, str);
-  printf("%s", str);
+  if(num < 0)
+  {
+    result[0] = '-';
+    ulong_to_str(-num, result+1);
+  }
+  else
+  {
+    ulong_to_str(num, result);
+  }
+
+  return result;
 }
 
-// Remember to free the result!
-char* bytes_to_str(unsigned long num, int decimals)
+// result must be long enough for result + 1 ('\0').
+// Max length required is: 26+1+decimals+1 = 28+decimals bytes
+//   strlen('-9,223,372,036,854,775,808') = 27
+//   strlen('.') = 1
+//   +1 for \0
+char* double_to_str(double num, int decimals, char* str)
+{
+  unsigned long whole_units = (unsigned long)num;
+  num -= whole_units;
+
+  ulong_to_str(whole_units, str);
+
+  if(decimals > 0)
+  {
+    // Horrible hack to save character being overwritten with a leading zero
+    // e.g. 12.121 written as '12' then '0.121', giving '10.121', put back '2'
+    // '12.121'
+    size_t offset = strlen(str);
+    char c = str[offset-1];
+    sprintf(str+offset-1, "%.*lf", decimals, num);
+    str[offset-1] = c;
+  }
+
+  return str;
+}
+
+// str must be 26 + 3 + 1 + num decimals + 1 = 31+decimals bytes
+// breakdown:
+//   strlen('18,446,744,073,709,551,615') = 26
+//   strlen(' GB') = 3
+//   strlen('.') = 1
+//   +1 for '\0'
+char* bytes_to_str(unsigned long num, int decimals, char* str)
 {
   const unsigned int num_unit_sizes = 7;
   char *units[] = {"B", "KB", "MB", "GB", "TB", "PB", "EB"};
@@ -141,27 +186,27 @@ char* bytes_to_str(unsigned long num, int decimals)
     num_cpy /= 1024;
 
   unsigned long bytes_in_unit = 0x1UL << (10 * unit);
-  long double num_of_units = (long double)num / bytes_in_unit;
+  double num_of_units = (double)num / bytes_in_unit;
 
-  // +2 for decimal point and single decimal place
-  size_t bytes_for_num = num_of_digits((unsigned long)num_of_units)+2;
+  double_to_str(num_of_units, decimals, str);
+  size_t offset = strlen(str);
+  sprintf(str+offset, " %s", units[unit]);
 
-  char *result = malloc(bytes_for_num+1+strlen(units[unit])+1);
-
-  sprintf(result, "%.*Lf %s", decimals, num_of_units, units[unit]);
-
-  return result;
+  return str;
 }
 
 
-char* memory_required(unsigned long num_of_hash_entries)
+
+// str must be at least 32 bytes long
+// max lenth: strlen '18,446,744,073,709,551,615.0 GB' + 1 = 32 bytes
+void memory_required(unsigned long num_of_hash_entries, char* str)
 {
   // Size of each entry is rounded up to nearest 8 bytes
   unsigned long num_of_bytes
     = num_of_hash_entries *
       round_up_ulong(8*num_of_bitfields + 5*num_of_colours + 1, 8);
 
-  return bytes_to_str(num_of_bytes, 1);
+  bytes_to_str(num_of_bytes, 1, str);
 }
 
 off_t get_file_size(char* filepath)
@@ -179,23 +224,29 @@ off_t get_file_size(char* filepath)
 
 void print_kmer_stats()
 {
+  char num_str[50];
+
   if(num_of_all_zero_kmers > 1)
-    report_error("%lu all-zero-kmers seen\n", num_of_all_zero_kmers);
+  {
+    report_error("%s all-zero-kmers seen\n",
+                 ulong_to_str(num_of_all_zero_kmers, num_str));
+  }
 
   if(num_of_oversized_kmers > 0)
-    report_error("%lu oversized kmers seen\n", num_of_oversized_kmers);
+  {
+    report_error("%s oversized kmers seen\n",
+                 ulong_to_str(num_of_oversized_kmers, num_str));
+  }
 
   if(num_of_zero_covg_kmers > 0)
   {
-    report_error("%lu kmers have no coverage is any colour\n",
-                 num_of_zero_covg_kmers);
+    report_error("%s kmers have no coverage is any colour\n",
+                 ulong_to_str(num_of_zero_covg_kmers, num_str));
   }
 
   if((print_kmers || parse_kmers) && print_info)
   {
-    printf("kmers read: ");
-    print_long(num_of_kmers_read);
-    printf("\n");
+    printf("kmers read: %s\n", ulong_to_str(num_of_kmers_read, num_str));
   }
 
   if(print_info)
@@ -236,19 +287,20 @@ void print_kmer_stats()
 
     hash_entries = (0x1UL << mem_height) * mem_width;
 
-    char* min_mem_required = memory_required(kmer_count);
-    char* rec_mem_required = memory_required(hash_entries);
+    char min_mem_required[32];
+    char rec_mem_required[32];
+
+    memory_required(kmer_count, min_mem_required);
+    memory_required(hash_entries, rec_mem_required);
 
     printf("Memory required: %s memory\n", min_mem_required);
     printf("Memory suggested: --mem_width %lu --mem_height %lu\n",
            mem_width, mem_height);
 
-    printf("  [");
-    print_long(hash_entries);
-    printf(" entries; %s memory]\n", rec_mem_required);
+    char hash_entries_numstr[32];
+    ulong_to_str(hash_entries, hash_entries_numstr);
 
-    free(min_mem_required);
-    free(rec_mem_required);
+    printf("  [%s entries; %s memory]\n", hash_entries_numstr, rec_mem_required);
   }
 }
 
@@ -478,9 +530,9 @@ int main(int argc, char** argv)
 
   if(file_size != -1 && print_info)
   {
-    char* str = bytes_to_str(file_size, 0);
+    char str[31];
+    bytes_to_str(file_size, 0, str);
     printf("File size: %s\n", str);
-    free(str);
   }
 
   /*
@@ -731,7 +783,9 @@ int main(int argc, char** argv)
 
     if(print_info)
     {
-      printf("Expected number of kmers: %lu\n", expected_num_kmers);
+      char num_str[50];
+      printf("Expected number of kmers: %s\n",
+             ulong_to_str(expected_num_kmers, num_str));
     }
 
     size_t excess = bytes_remaining - (expected_num_kmers * num_bytes_per_kmer);
