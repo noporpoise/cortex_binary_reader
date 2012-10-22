@@ -241,7 +241,7 @@ void print_kmer_stats()
 
   if(num_of_zero_covg_kmers > 0)
   {
-    report_error("%s kmers have no coverage is any colour\n",
+    report_error("%s kmers have no coverage in any colour\n",
                  ulong_to_str(num_of_zero_covg_kmers, num_str));
   }
 
