@@ -209,6 +209,7 @@ void memory_required(unsigned long num_of_hash_entries, char* str)
   bytes_to_str(num_of_bytes, 1, str);
 }
 
+// Returns -1 on failure
 off_t get_file_size(char* filepath)
 {
   struct stat st;
@@ -713,10 +714,12 @@ int main(int argc, char** argv)
         printf("  sample name: '%s'\n", sample_names[i]);
       }
 
+      char tmp[32];
+
       printf("  mean read length: %u\n",
              (unsigned int)mean_read_lens_per_colour[i]);
-      printf("  total sequence loaded: %lu\n",
-             (unsigned long)total_seq_loaded_per_colour[i]);
+      printf("  total sequence loaded: %s\n",
+             ulong_to_str(total_seq_loaded_per_colour[i], tmp));
       
       if(version == 6)
       {
@@ -879,12 +882,17 @@ int main(int argc, char** argv)
       num_of_all_zero_kmers++;
     }
 
-    // Check covg is == 0 for all colours
+    // Check covg is 0 for all colours
     char kmer_has_covg = 0;
 
     for(i = 0; i < num_of_colours; i++)
+    {
       if(covgs[i] > 0)
+      {
         kmer_has_covg = 1;
+        break;
+      }
+    }
 
     if(kmer_has_covg == 0)
     {
