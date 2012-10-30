@@ -268,25 +268,33 @@ void print_kmer_stats()
     unsigned int min_mem_height = 12;
     // min mem usage = 2^12 * 5 = 20,480 entries = 320.0 KB with k=31,cols=1
 
-    unsigned long mem_height, mem_width, hash_entries;
+    unsigned long mem_height = min_mem_height;
+    unsigned long mem_width = max_mem_width;
+    unsigned long hash_entries = (0x1UL << mem_height) * mem_width;
 
-    mem_height = log2((long double)hash_capacity / (max_mem_width-1))+0.99;
-    mem_height = MIN2(mem_height, 32);
-    mem_height = MAX2(mem_height, min_mem_height);
-
-    mem_width = hash_capacity / (0x1UL << mem_height) + 1;
-
-    if(mem_width < min_mem_width)
+    if(hash_capacity > hash_entries)
     {
-      // re-calculate mem_height
-      mem_height = log2((long double)hash_capacity / min_mem_width)+0.99;
+      // Resize
+      mem_height = log2((long double)hash_capacity / (max_mem_width-1))+0.99;
       mem_height = MIN2(mem_height, 32);
       mem_height = MAX2(mem_height, min_mem_height);
-      mem_width = hash_capacity / (0x1UL << mem_height) + 1;
-      mem_width = MAX2(mem_width, min_mem_width);
-    }
 
-    hash_entries = (0x1UL << mem_height) * mem_width;
+      mem_width = hash_capacity / (0x1UL << mem_height) + 1;
+
+      printf("mem_width: %lu; mem_height: %lu;\n", mem_width, mem_height);
+
+      if(mem_width < min_mem_width)
+      {
+        // re-calculate mem_height
+        mem_height = log2((long double)hash_capacity / min_mem_width)+0.99;
+        mem_height = MIN2(mem_height, 32);
+        mem_height = MAX2(mem_height, min_mem_height);
+        mem_width = hash_capacity / (0x1UL << mem_height) + 1;
+        mem_width = MAX2(mem_width, min_mem_width);
+      }
+
+      hash_entries = (0x1UL << mem_height) * mem_width;
+    }
 
     char min_mem_required[32];
     char rec_mem_required[32];
@@ -951,15 +959,16 @@ int main(int argc, char** argv)
   //num_of_kmers_read = 3600000000;
   //num_of_kmers_read = 12345;
   //num_of_kmers_read = 3581787;
+  //num_of_kmers_read = 0;
 
   print_kmer_stats();
 
   fclose(fh);
 
-  if((print_kmers || parse_kmers) && print_info && valid_file)
+  if((print_kmers || parse_kmers) && print_info)
   {
     printf("----\n");
-    printf("Binary appears to be valid\n");
+    printf(valid_file ? "Binary appears to be valid\n" : "Binary has errors\n");
   }
 
   exit(EXIT_SUCCESS);

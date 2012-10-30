@@ -14,6 +14,24 @@ and to run:
 
     ./cortex_bin_reader
 
+To print header and exit
+
+    cortex_bin_reader --print_info in.ctx
+
+To print header and parse kmers (checks for corruption) -- this is the default
+behaviour so these two are the same
+
+    cortex_bin_reader --print_info --parse_kmers in.ctx
+    cortex_bin_reader in.ctx
+
+To only print kmers:
+
+    cortex_bin_reader --print_kmers in.ctx
+
+To sum coverage:
+
+    cortex_bin_reader --print_kmers in.ctx | awk '{total += $2} END { print total}'
+
 Usage
 -----
 
