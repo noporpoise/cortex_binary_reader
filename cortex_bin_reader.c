@@ -10,6 +10,15 @@
 #define MIN2(x,y) ((x) <= (y) ? (x) : (y))
 #define MAX2(x,y) ((x) >= (y) ? (x) : (y))
 
+#ifndef GNULIB_LOG2
+// Calculates log2 of number.  
+double log2(double n)  
+{  
+  // log(n)/log(2) is log2.  
+  return log(n) / log(2);  
+}
+#endif
+
 typedef struct
 {
   char tip_cleaning;
@@ -275,7 +284,7 @@ void print_kmer_stats()
     if(hash_capacity > hash_entries)
     {
       // Resize
-      mem_height = log2((long double)hash_capacity / (max_mem_width-1))+0.99;
+      mem_height = log2((double)hash_capacity / (max_mem_width-1))+0.99;
       mem_height = MIN2(mem_height, 32);
       mem_height = MAX2(mem_height, min_mem_height);
 
