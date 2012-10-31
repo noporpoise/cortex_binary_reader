@@ -479,15 +479,16 @@ void print_usage()
 "               col 1: covg 4 [C]GTAAGTGCCA[A|T]\n"
 "\n"
 "  Header checks:\n"
-"    * binary version is 6\n"
+"    * binary version is 4, 5 or 6\n"
 "    * Kmer size is an odd number > 1\n"
 "    * number of bitfields is compatible with kmer size\n"
 "    * number of colours is > 0\n"
+"    * Strings are correct length (don't have premature \\0)\n"
 "\n"
 "  Kmer checks:\n"
 "    * each kmer's top bits are all zeroed (i.e. kmer is not 'oversized')\n"
 "    * no more than one kmer is all As i.e. no multiple 'AAAAAAAA' kmers\n"
-"    * each kmer has covg greater than zero in at least one colour\n"
+"    * each kmer has coverage greater than zero in at least one colour\n"
 "\n"
 "  Comments/bugs/requests: <turner.isaac@gmail.com>\n");
 
