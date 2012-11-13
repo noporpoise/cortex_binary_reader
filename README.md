@@ -28,9 +28,20 @@ To only print kmers:
 
     cortex_bin_reader --print_kmers in.ctx
 
-To sum coverage:
+To sum coverage with awk
 
     cortex_bin_reader --print_kmers in.ctx | awk '{total += $2} END { print total}'
+
+Get the number of kmers with grep
+
+    cortex_bin_reader --print_info in.ctx | grep 'Expected number of kmers:' | grep -o '[0-9,]*$' | tr -d ','
+
+If you have a very small graph (i.e. toy example -- ~100 kmers) you can draw
+it if you have graphviz installed.  This is useful for understanding what a de
+Bruijn graph with a given kmer will look like.  To draw the graph:
+
+  ./scripts/cortex_to_graphviz.pl in.ctx > in.dot
+  dot -Tpng in.dot > in.png
 
 Usage
 -----
