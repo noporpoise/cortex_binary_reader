@@ -54,6 +54,10 @@ uint32_t kmer_size;
 uint32_t num_of_bitfields;
 uint32_t num_of_colours;
 
+// version 7
+uint64_t expected_num_of_kmers;
+uint32_t num_of_paths;
+
 // version 6 only below here
 char **sample_names = NULL;
 long double *seq_error_rates = NULL;
@@ -64,7 +68,6 @@ CleaningInfo *cleaning_infos = NULL;
 //
 off_t file_size;
 size_t num_bytes_read = 0;
-unsigned long expected_num_kmers = 0;
 
 // Does this file pass all tests?
 char valid_file = 1;
@@ -263,7 +266,7 @@ void print_kmer_stats()
     // Memory calculations
     // use expected number of kmers if we haven't read the whole file
     unsigned long kmer_count
-      = (print_kmers || parse_kmers ? num_of_kmers_read : expected_num_kmers);
+      = (print_kmers || parse_kmers ? num_of_kmers_read : expected_num_of_kmers);
 
     // Number of hash table entries is 2^mem_height * mem_width
     // Aim for 80% occupancy once loaded
@@ -322,7 +325,7 @@ void print_kmer_stats()
 }
 
 void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
-              char* entry_name)
+              const char* entry_name)
 {
   size_t read = fread(ptr, size, nitems, stream);
   num_bytes_read += read * size;
@@ -357,14 +360,10 @@ char binary_nucleotide_to_char(Nucleotide n)
 {
   switch (n)
   {
-    case Adenine:
-      return 'A';
-    case Cytosine:
-      return 'C';
-    case Guanine:
-      return 'G';
-    case Thymine:
-      return 'T';
+    case Adenine:  return 'A';
+    case Cytosine: return 'C';
+    case Guanine:  return 'G';
+    case Thymine:  return 'T';
     default:
       fprintf(stderr, "Non existent binary nucleotide %d\n", n);
       exit(EXIT_FAILURE);
@@ -375,22 +374,14 @@ char char_rev_comp(char c)
 {
   switch(c)
   {
-    case 'T':
-      return 'A';
-    case 'G':
-      return 'C';
-    case 'C':
-      return 'G';
-    case 'A':
-      return 'T';
-    case 't':
-      return 'a';
-    case 'g':
-      return 'c';
-    case 'c':
-      return 'g';
-    case 'a':
-      return 't';
+    case 'T': return 'A';
+    case 'G': return 'C';
+    case 'C': return 'G';
+    case 'A': return 'T';
+    case 't': return 'a';
+    case 'g': return 'c';
+    case 'c': return 'g';
+    case 'a': return 't';
     default:
       fprintf(stderr, "Non existent char nucleotide %c\n", c);
       exit(EXIT_FAILURE);
@@ -594,10 +585,22 @@ int main(int argc, char** argv)
     printf("colours: %i\n", (int)num_of_colours);
   }
 
+  if(version >= 7)
+  {
+    my_fread(&expected_num_of_kmers, sizeof(uint64_t), 1, fh, "number of kmers");
+    my_fread(&num_of_paths, sizeof(uint32_t), 1, fh, "number of paths");
+  
+    if(print_info)
+    {
+      printf("kmers: %lu\n", (unsigned long)expected_num_of_kmers);
+      printf("paths: %i\n", (int)num_of_paths);
+    }
+  }
+
   // Checks
 
-  if(version > 6 || version < 4)
-    report_error("Sorry, we only support binary versions 4, 5 & 6\n");
+  if(version > 7 || version < 4)
+    report_error("Sorry, we only support binary versions 4, 5, 6 & 7\n");
 
   if(kmer_size % 2 == 0)
     report_error("kmer size is not an odd number\n");
@@ -608,11 +611,14 @@ int main(int argc, char** argv)
   if(num_of_bitfields * 32 < kmer_size)
     report_error("Not enough bitfields for kmer size\n");
 
-  if((num_of_bitfields-1)*32 > kmer_size)
+  if((num_of_bitfields-1)*32 >= kmer_size)
     report_error("using more than the minimum number of bitfields\n");
 
   if(num_of_colours == 0)
     report_error("number of colours is zero\n");
+
+  if((num_of_paths & 0x7) != 0)
+    report_error("number of paths is not a multiple of 8\n");
 
   //
 
@@ -630,7 +636,7 @@ int main(int argc, char** argv)
   my_fread(total_seq_loaded_per_colour, sizeof(uint64_t), num_of_colours, fh,
            "total sequance loaded for each colour");
 
-  if(version == 6)
+  if(version >= 6)
   {
     sample_names = (char**)malloc(sizeof(char*) * num_of_colours);
 
@@ -725,7 +731,7 @@ int main(int argc, char** argv)
     {
       printf("-- Colour %i --\n", i);
 
-      if(version == 6)
+      if(version >= 6)
       {
         // Version 6 only output
         printf("  sample name: '%s'\n", sample_names[i]);
@@ -738,7 +744,7 @@ int main(int argc, char** argv)
       printf("  total sequence loaded: %s\n",
              ulong_to_str(total_seq_loaded_per_colour[i], tmp));
       
-      if(version == 6)
+      if(version >= 6)
       {
         // Version 6 only output
         printf("  sequence error rate: %Lf\n", seq_error_rates[i]);
@@ -792,29 +798,29 @@ int main(int argc, char** argv)
   }
 
   // Calculate number of kmers
-  if(file_size != -1)
+  if(version < 7 && file_size != -1)
   {
     size_t bytes_remaining = file_size - num_bytes_read;
     size_t num_bytes_per_kmer = sizeof(uint64_t) * num_of_bitfields +
                                 sizeof(uint32_t) * num_of_colours +
-                                sizeof(char) * num_of_colours;
+                                sizeof(uint8_t) * num_of_colours;
 
-    expected_num_kmers = bytes_remaining / num_bytes_per_kmer;
+    expected_num_of_kmers = bytes_remaining / num_bytes_per_kmer;
 
     if(print_info)
     {
       char num_str[50];
       printf("Expected number of kmers: %s\n",
-             ulong_to_str(expected_num_kmers, num_str));
+             ulong_to_str(expected_num_of_kmers, num_str));
     }
 
-    size_t excess = bytes_remaining - (expected_num_kmers * num_bytes_per_kmer);
+    size_t excess = bytes_remaining - (expected_num_of_kmers * num_bytes_per_kmer);
 
     if(excess > 0)
     {
       report_error("Excess bytes. Bytes:\n  file size: %lu;\n  for kmers: %lu;"
                    "\n  num kmers: %lu;\n  per kmer: %lu;\n  excess: %lu\n",
-                   file_size, bytes_remaining, expected_num_kmers,
+                   file_size, bytes_remaining, expected_num_of_kmers,
                    num_bytes_per_kmer, excess);
     }
   }
@@ -848,7 +854,7 @@ int main(int argc, char** argv)
 
   while((bytes_read = fread(kmer, 1, num_bytes_per_bkmer, fh)) > 0)
   {
-    num_bytes_read += bytes_read * num_bytes_per_bkmer;
+    num_bytes_read += bytes_read;
 
     if(bytes_read != num_bytes_per_bkmer)
     {
@@ -942,10 +948,10 @@ int main(int argc, char** argv)
     num_of_kmers_read++;
   }
 
-  if(num_of_kmers_read != expected_num_kmers)
+  if(num_of_kmers_read != expected_num_of_kmers)
   {
     report_error("Expected %lu kmers, read %lu\n",
-                 num_of_kmers_read, expected_num_kmers);
+                 num_of_kmers_read, expected_num_of_kmers);
   }
 
   if(print_kmers && print_info)

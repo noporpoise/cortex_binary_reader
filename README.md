@@ -40,8 +40,8 @@ If you have a very small graph (i.e. toy example -- ~100 kmers) you can draw
 it if you have graphviz installed.  This is useful for understanding what a de
 Bruijn graph with a given kmer will look like.  To draw the graph:
 
-  ./scripts/cortex_to_graphviz.pl in.ctx > in.dot
-  dot -Tpng in.dot > in.png
+    ./scripts/cortex_to_graphviz.pl in.ctx > in.dot
+    dot -Tpng in.dot > in.png
 
 Usage
 -----
