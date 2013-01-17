@@ -12,11 +12,12 @@
 
 
 // Calculates log2 of number since log2 is only available in some libc versions
-double Log2(double n)  
+double Log2(double n)
 {  
   // log(n)/log(2) is log2.  
   return log(n) / log(2);  
 }
+#define Log2(n) (log(n) / log(2))
 
 typedef struct
 {
@@ -74,6 +75,8 @@ char valid_file = 1;
 
 // Reading stats
 unsigned long num_of_kmers_read = 0;
+unsigned long sum_of_covgs_read = 0;
+unsigned long sum_of_seq_loaded = 0;
 
 // Checks
 unsigned long num_of_all_zero_kmers = 0;
@@ -201,11 +204,10 @@ char* bytes_to_str(unsigned long num, int decimals, char* str)
 
   double_to_str(num_of_units, decimals, str);
   size_t offset = strlen(str);
-  sprintf(str+offset, " %s", units[unit]);
+  strcpy(str+offset, units[unit]);
 
   return str;
 }
-
 
 
 // str must be at least 32 bytes long
@@ -259,6 +261,8 @@ void print_kmer_stats()
   if((print_kmers || parse_kmers) && print_info)
   {
     printf("kmers read: %s\n", ulong_to_str(num_of_kmers_read, num_str));
+    printf("covgs read: %s\n", ulong_to_str(sum_of_covgs_read, num_str));
+    printf("seq loaded: %s\n", ulong_to_str(sum_of_seq_loaded, num_str));
   }
 
   if(print_info)
@@ -313,7 +317,7 @@ void print_kmer_stats()
     memory_required(kmer_count, min_mem_required);
     memory_required(hash_entries, rec_mem_required);
 
-    printf("Memory required: %s memory\n", min_mem_required);
+    printf("Memory required: %s\n", min_mem_required);
     printf("Memory suggested: --mem_width %lu --mem_height %lu\n",
            mem_width, mem_height);
 
@@ -636,6 +640,11 @@ int main(int argc, char** argv)
   my_fread(total_seq_loaded_per_colour, sizeof(uint64_t), num_of_colours, fh,
            "total sequance loaded for each colour");
 
+  for(i = 0; i < num_of_colours; i++)
+  {
+    sum_of_seq_loaded += total_seq_loaded_per_colour[i];
+  }
+
   if(version >= 6)
   {
     sample_names = (char**)malloc(sizeof(char*) * num_of_colours);
@@ -946,6 +955,9 @@ int main(int argc, char** argv)
     }
 
     num_of_kmers_read++;
+
+    for(i = 0; i < num_of_colours; i++)
+      sum_of_covgs_read += covgs[i];
   }
 
   if(num_of_kmers_read != expected_num_of_kmers)
