@@ -449,6 +449,15 @@ char* binary_kmer_to_seq(uint64_t* bkmer, char * seq,
   return seq;
 }
 
+#define has_path(p,n)   (((p)[(n) >> 3] >> ((n) & 0x7)) & 0x1)
+
+char get_path_char(uint8_t *paths, uint8_t *pends, int p)
+{
+  if(has_path(pends,p)) return 'A'+(p % 26);
+  else if(has_path(paths,p)) return 'a'+(p % 26);
+  else return '.';
+}
+
 void print_usage()
 {
   fprintf(stderr,
@@ -794,7 +803,7 @@ int main(int argc, char** argv)
       }
     }
 
-    printf("----\n");
+    printf("--\n");
   }
 
   // Read magic word at the end of header
@@ -816,13 +825,6 @@ int main(int argc, char** argv)
 
     expected_num_of_kmers = bytes_remaining / num_bytes_per_kmer;
 
-    if(print_info)
-    {
-      char num_str[50];
-      printf("Expected number of kmers: %s\n",
-             ulong_to_str(expected_num_of_kmers, num_str));
-    }
-
     size_t excess = bytes_remaining - (expected_num_of_kmers * num_bytes_per_kmer);
 
     if(excess > 0)
@@ -834,6 +836,14 @@ int main(int argc, char** argv)
     }
   }
 
+  if(print_info)
+  {
+    char num_str[50];
+    printf("Expected number of kmers: %s\n",
+           ulong_to_str(expected_num_of_kmers, num_str));
+    printf("----\n");
+  }
+
   // Finished parsing header
   if(!parse_kmers && !print_kmers)
   {
@@ -842,10 +852,15 @@ int main(int argc, char** argv)
     exit(EXIT_SUCCESS);
   }
 
+
+  size_t path_bytes = num_of_paths >> 3;
+  size_t path_array_bytes = path_bytes * 2 * num_of_colours;
+
   // Kmer data
   uint64_t* kmer = (uint64_t*)malloc(sizeof(uint64_t) * num_of_bitfields);
   uint32_t* covgs = (uint32_t*)malloc(sizeof(uint32_t) * num_of_colours);
-  char* edges = (char*)malloc(sizeof(char) * kmer_size);
+  uint8_t* edges = (uint8_t*)malloc(sizeof(uint8_t) * kmer_size);
+  uint8_t* path_data = (uint8_t*)malloc(path_array_bytes);
 
   // Convert values to strings
   char* seq = (char*)malloc(sizeof(char) * kmer_size);
@@ -873,7 +888,12 @@ int main(int argc, char** argv)
     }
 
     my_fread(covgs, sizeof(uint32_t), num_of_colours, fh, "kmer covg");
-    my_fread(edges, sizeof(char), num_of_colours, fh, "kmer edges");
+    my_fread(edges, sizeof(uint8_t), num_of_colours, fh, "kmer edges");
+
+    if(version >= 7)
+    {
+      my_fread(path_data, sizeof(uint8_t), path_array_bytes, fh, "path flavours");
+    }
 
     //
     // Kmer checks
@@ -950,6 +970,21 @@ int main(int argc, char** argv)
       // Print edges
       for(i = 0; i < num_of_colours; i++)
         printf(" %s", get_edges_str(edges[i], kmer_colour_edge_str));
+
+      if(version >= 7 && num_of_paths > 0)
+      {
+        size_t j;
+        for(i = 0; i < num_of_colours; i++)
+        {
+          putc(' ',stdout);
+          for(j = 0; j < num_of_paths; j++)
+          {
+            char p = get_path_char(path_data + i*path_bytes*2,
+                                   path_data + i*path_bytes*2+path_bytes, j);
+            putc(p,stdout);
+          }
+        }
+      }
 
       printf("\n");
     }
