@@ -79,7 +79,7 @@ while(defined(my $line = <$in>))
   {
     print STDERR "$line\n";
   }
-  elsif($line =~ /^([acgt]+) (\d+ )+([acgt\.]{8})$/i)
+  elsif($line =~ /^([acgt]+) (\d+ )+([acgt\.]{8})( |$)/i)
   {
     my $kmer = $1;
     my $covgs = $2;
