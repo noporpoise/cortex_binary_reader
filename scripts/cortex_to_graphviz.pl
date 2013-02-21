@@ -69,7 +69,7 @@ my $pid = open2($in, $out, $cmdline)
   or die("Cannot run cmd: '$cmdline'");
 
 print "digraph G {\n";
-print "  node [" . ($use_points ? "shape=point label=none" : "shape=box") ."]\n";
+print "  node [" . ($use_points ? "shape=point label=none" : "shape=ellipse") ."]\n";
 print "  edge [dir=both arrowhead=none arrowtail=none]\n";
 
 while(defined(my $line = <$in>))

@@ -1,11 +1,12 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <sys/stat.h>
 #include <string.h>
-#include <stdarg.h>
 #include <inttypes.h>
 #include <errno.h>
 #include <math.h>
+#include <ctype.h> // toupper
 
 #define MIN2(x,y) ((x) <= (y) ? (x) : (y))
 #define MAX2(x,y) ((x) >= (y) ? (x) : (y))
@@ -404,20 +405,24 @@ void binary_kmer_right_shift_one_base(uint64_t* kmer, int num_of_bitfields)
   kmer[0] >>= 2;
 }
 
+
+#define rev_nibble(x) (((x&0x1)<<3) | ((x&0x2)<<1) | ((x&0x4)>>1) | ((x&0x8)>>3))
+
 char* get_edges_str(char edges, char* kmer_colour_edge_str)
 {
   int i;
 
-  char *str = "acgtACGT";
+  char str[] = "acgt";
 
   char left = edges >> 4;
+  left = rev_nibble(left);
   char right = edges & 0xf;
 
   for(i = 0; i < 4; i++)
-    kmer_colour_edge_str[i] = (left & (0x1 << (3-i)) ? str[i] : '.');
+    kmer_colour_edge_str[i] = (left & (0x1 << i) ? str[i] : '.');
 
   for(i = 0; i < 4; i++)
-    kmer_colour_edge_str[i+4] = (right & (0x1 << i) ? str[i+4] : '.');
+    kmer_colour_edge_str[i+4] = toupper(right & (0x1 << i) ? str[i] : '.');
 
   kmer_colour_edge_str[8] = '\0';
 
