@@ -151,7 +151,7 @@ sub dump_edge
   # When doing right hand edges, do only those that go to left
   #                              or those to a greater key
   # When doing left hand edges, do only those that go to a greater key
-  if(($going_right && $rev1 == $rev2) || ($rev1 != $rev2 && $key1 lt $key2))
+  if(($going_right && $rev1 == $rev2) || ($rev1 != $rev2 && $key1 le $key2))
   {
     # Print a coloured edge for each colour that is in both nodes
     print "  $key1:" . ($rev1 ? 'w' : 'e') . " -> " .
