@@ -19,10 +19,11 @@ sub print_usage
   }
   
   print STDERR "" .
-"Usage: ./cortex_to_graphviz.pl [--point] <in.ctx>
+"Usage: ./cortex_to_graphviz.pl [--point|--flavour] <in.ctx>
   Prints graphviz `dot' output.  Not to be used with large graphs!
 
-  --point  Don't print kmer values, only points
+  --point    Don't print kmer values, only points
+  --flavour  Print flavours
 
   Example: ./cortex_to_graphviz.pl small.ctx > small.dot
            dot -Tpng small.dot > small.png\n";
@@ -31,10 +32,18 @@ sub print_usage
 }
 
 my $use_points = 0;
-if(@ARGV == 2 && $ARGV[0] =~ /^-?-p(oints)?$/i)
-{
-  shift;
-  $use_points = 1;
+my $print_flavours = 0;
+
+while(@ARGV > 1) {
+  if($ARGV[0] =~ /^-?-p(oints?)?$/i) {
+    shift;
+    $use_points = 1;
+  }
+  elsif($ARGV[0] =~ /^-?-f(lavours?)?$/i) {
+    shift;
+    $print_flavours = 1;
+  }
+  else { print_usage("Unknown option '$ARGV[0]'"); }
 }
 
 if(@ARGV != 1)
@@ -59,32 +68,66 @@ if(!(-e $cmd))
 elsif(!(-x $cmd))
 {
   print STDERR "Error: cortex_bin_reader doesn't appear to be executable\n";
+  exit(-1);
 }
 
 my $cmdline = "$cmd --print_kmers $file 2>&1";
 
-my ($in, $out);
-
-my $pid = open2($in, $out, $cmdline)
-  or die("Cannot run cmd: '$cmdline'");
+my ($pid, $in, $out);
 
 print "digraph G {\n";
-print "  node [" . ($use_points ? "shape=point label=none" : "shape=ellipse") ."]\n";
+
+my @fcols = qw(red green blue orange purple pink brown black);
+
+if($print_flavours)
+{
+  $pid = open2($in, $out, $cmdline) or die("Cannot run cmd: '$cmdline'");
+
+  while(defined(my $line = <$in>))
+  {
+    my ($kmer, $covgs, $edges, $flavours) = parse_ctx_line($line);
+    if(defined($kmer))
+    {
+      my @flav = split('', $flavours);
+
+      print $kmer.' [shape=none label=<<table border="0" cellborder="0">
+<tr><td PORT="'.$kmer.'" colspan="'.@flav.'" cellpadding="0" cellspacing="0"><font face="courier" point-size="9">'.($use_points ? '.' : $kmer).'</font></td></tr>
+<tr>';
+
+      for(my $i = 0; $i < @flav; $i++) {
+        print '<td fixedsize="true" width="3" height="3" style="rounded" cellpadding="0" cellspacing="0" border="1" ';
+        if($flav[$i] ne '.') {
+          if($flav[$i] eq lc($flav[$i])) {
+            print 'color="'.$fcols[$i].'"';
+          }
+          else { print 'color="'.$fcols[$i].'" bgcolor="'.$fcols[$i].'"'; }
+        }
+        else { print 'color="white"'; }
+        print '></td>'."\n"; # <font point-size="5">&nbsp;</font>
+      }
+
+      print "</tr></table>>];\n";
+    }
+  }
+
+  close($in);
+  close($out);
+}
+else
+{
+  print "  node [" . ($use_points ? "shape=point label=none" : "shape=ellipse") ."]\n";
+}
+
+$pid = open2($in, $out, $cmdline) or die("Cannot run cmd: '$cmdline'");
+
+
 print "  edge [dir=both arrowhead=none arrowtail=none]\n";
 
 while(defined(my $line = <$in>))
 {
-  chomp($line);
-  if($line =~ /Error/i)
+  my ($kmer, $covgs, $edges, $flavours) = parse_ctx_line($line);
+  if(defined($kmer))
   {
-    print STDERR "$line\n";
-  }
-  elsif($line =~ /^([acgt]+) (\d+ )+([acgt\.]{8})( |$)/i)
-  {
-    my $kmer = $1;
-    my $covgs = $2;
-    my $edges = $3;
-
     for(my $i = 0; $i < 4; $i++)
     {
       if((my $edge = substr($edges, $i, 1)) ne ".")
@@ -103,12 +146,6 @@ while(defined(my $line = <$in>))
       }
     }
   }
-  else
-  {
-    print STDERR "Cannot parse line:\n";
-    print STDERR "  $line\n";
-    exit(-1);
-  }
 }
 
 print "}\n";
@@ -117,6 +154,29 @@ close($in);
 close($out);
 
 waitpid($pid, 1);
+
+sub parse_ctx_line
+{
+  my ($line) = @_;
+
+  chomp($line);
+  if($line =~ /Error/i)
+  {
+    print STDERR "$line\n";
+    return undef;
+  }
+  elsif($line =~ /^([acgt]+) (\d+ )+([acgt\.]{8})(?: ([a-z0-9\.]+))?$/i)
+  {
+    # return: $kmer, $covgs, $edges, $flavours
+    return ($1, $2, $3, $4);
+  }
+  else
+  {
+    print STDERR "Cannot parse line:\n";
+    print STDERR "  $line\n";
+    exit(-1);
+  }
+}
 
 sub kmer_key
 {
@@ -154,7 +214,9 @@ sub dump_edge
   if(($going_right && $rev1 == $rev2) || ($rev1 != $rev2 && $key1 le $key2))
   {
     # Print a coloured edge for each colour that is in both nodes
-    print "  $key1:" . ($rev1 ? 'w' : 'e') . " -> " .
-            "$key2:" . ($rev2 ? 'e' : 'w') . "\n";
+    $key1 = $print_flavours ? "$key1:$key1:" : "$key1:";
+    $key2 = $print_flavours ? "$key2:$key2:" : "$key2:";
+    print "  $key1" . ($rev1 ? 'w' : 'e') . " -> " .
+             $key2  . ($rev2 ? 'e' : 'w') . "\n";
   }
 }
