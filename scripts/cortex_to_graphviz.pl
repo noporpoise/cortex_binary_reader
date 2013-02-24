@@ -170,7 +170,7 @@ sub parse_ctx_line
     print STDERR "$line\n";
     return undef;
   }
-  elsif($line =~ /^([acgt]+) (\d+ )+([acgt\.]{8})(?: ([a-z0-9\.]+))?$/i)
+  elsif($line =~ /^([acgt]+) (\d+ )+([acgt\.]{8})(?: ([a-z\-\.]+))?$/i)
   {
     # return: $kmer, $covgs, $edges, $flavours
     return ($1, $2, $3, $4);
