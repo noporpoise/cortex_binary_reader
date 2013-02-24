@@ -58,7 +58,7 @@ uint32_t num_of_colours;
 
 // version 7
 uint64_t expected_num_of_kmers;
-uint32_t num_of_paths;
+uint32_t num_of_paths, path_bytes;
 
 // version 6 only below here
 char **sample_names = NULL;
@@ -463,6 +463,22 @@ char get_path_char(uint8_t *paths, uint8_t *pends, int p)
   else return '.';
 }
 
+#define is_node_inactive(paths, pends, full_set_paths) \
+        (memcmp(paths, full_set_paths, path_bytes) == 0 && \
+         memcmp(pends, full_set_paths, path_bytes) == 0)
+
+void print_colour_flavour(uint8_t *paths, uint8_t *pends, uint8_t *full_set_paths)
+{
+  // Check if node is inactive
+  size_t i;
+  if(is_node_inactive(paths, pends, full_set_paths)) {
+    for(i = 0; i < num_of_paths; i++) { putc('-', stdout); }
+  }
+  else {
+    for(i = 0; i < num_of_paths; i++) { putc(get_path_char(paths, pends, i), stdout); }
+  }
+}
+
 void print_usage()
 {
   fprintf(stderr,
@@ -858,14 +874,18 @@ int main(int argc, char** argv)
   }
 
 
-  size_t path_bytes = num_of_paths >> 3;
-  size_t path_array_bytes = path_bytes * 2 * num_of_colours;
+  path_bytes = num_of_paths >> 3;
+  size_t path_array_bytes = path_bytes * num_of_colours;
 
   // Kmer data
   uint64_t* kmer = (uint64_t*)malloc(sizeof(uint64_t) * num_of_bitfields);
   uint32_t* covgs = (uint32_t*)malloc(sizeof(uint32_t) * num_of_colours);
   uint8_t* edges = (uint8_t*)malloc(sizeof(uint8_t) * kmer_size);
   uint8_t* path_data = (uint8_t*)malloc(path_array_bytes);
+  uint8_t* pend_data = (uint8_t*)malloc(path_array_bytes);
+  uint8_t *full_set_paths = (uint8_t*)malloc(path_bytes);
+
+  memset(full_set_paths, 0xff, path_bytes);
 
   // Convert values to strings
   char* seq = (char*)malloc(sizeof(char) * kmer_size);
@@ -897,7 +917,14 @@ int main(int argc, char** argv)
 
     if(version >= 7)
     {
-      my_fread(path_data, sizeof(uint8_t), path_array_bytes, fh, "path flavours");
+      uint8_t *paths = path_data, *pends = pend_data;
+      for(i = 0; i < num_of_colours; i++)
+      {
+        my_fread(paths, sizeof(uint8_t), path_bytes, fh, "path flavours");
+        my_fread(pends, sizeof(uint8_t), path_bytes, fh, "path flavours");
+        paths += path_bytes;
+        pends += path_bytes;
+      }
     }
 
     //
@@ -978,20 +1005,15 @@ int main(int argc, char** argv)
 
       if(version >= 7 && num_of_paths > 0)
       {
-        size_t j;
         for(i = 0; i < num_of_colours; i++)
         {
-          putc(' ',stdout);
-          for(j = 0; j < num_of_paths; j++)
-          {
-            char p = get_path_char(path_data + i*path_bytes*2,
-                                   path_data + i*path_bytes*2+path_bytes, j);
-            putc(p,stdout);
-          }
+          putc(' ', stdout);
+          print_colour_flavour(path_data + i*path_bytes,
+                               pend_data + i*path_bytes, full_set_paths);
         }
       }
 
-      printf("\n");
+      putc('\n', stdout);
     }
 
     num_of_kmers_read++;
@@ -1031,6 +1053,13 @@ int main(int argc, char** argv)
   print_kmer_stats();
 
   fclose(fh);
+
+  free(kmer);
+  free(covgs);
+  free(edges);
+  free(path_data);
+  free(pend_data);
+  free(full_set_paths);
 
   if((print_kmers || parse_kmers) && print_info)
   {

@@ -93,7 +93,7 @@ if($print_flavours)
       my @flav = split('', $flavours);
 
       print $kmer . ' [shape=none label=<<table ' .
-            'border="'.($flavours =~ /^[A-Z]+$/ ? '1' : '0').'" cellborder="0">
+            'border="'.($flavours =~ /^\-+$/ ? '1' : '0').'" cellborder="0">
 <tr><td PORT="'.$kmer.'" colspan="'.@flav.'" cellpadding="0" cellspacing="0">
 <font face="courier" point-size="9">'.($use_points ? '.' : $kmer).'</font></td>
 </tr><tr>';
