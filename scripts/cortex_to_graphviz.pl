@@ -88,14 +88,19 @@ if($print_flavours)
     my ($kmer, $covgs, $edges, $flavours) = parse_ctx_line($line);
     if(defined($kmer))
     {
+      if(!defined($flavours) || $flavours =~ /^\s*$/) { last; }
+
       my @flav = split('', $flavours);
 
-      print $kmer.' [shape=none label=<<table border="0" cellborder="0">
-<tr><td PORT="'.$kmer.'" colspan="'.@flav.'" cellpadding="0" cellspacing="0"><font face="courier" point-size="9">'.($use_points ? '.' : $kmer).'</font></td></tr>
-<tr>';
+      print $kmer . ' [shape=none label=<<table ' .
+            'border="'.($flavours =~ /^[A-Z]+$/ ? '1' : '0').'" cellborder="0">
+<tr><td PORT="'.$kmer.'" colspan="'.@flav.'" cellpadding="0" cellspacing="0">
+<font face="courier" point-size="9">'.($use_points ? '.' : $kmer).'</font></td>
+</tr><tr>';
 
       for(my $i = 0; $i < @flav; $i++) {
-        print '<td fixedsize="true" width="3" height="3" style="rounded" cellpadding="0" cellspacing="0" border="1" ';
+        print '<td fixedsize="true" width="3" height="3" style="rounded" ' .
+              'cellpadding="0" cellspacing="0" border="1" ';
         if($flav[$i] ne '.') {
           if($flav[$i] eq lc($flav[$i])) {
             print 'color="'.$fcols[$i].'"';
@@ -103,7 +108,7 @@ if($print_flavours)
           else { print 'color="'.$fcols[$i].'" bgcolor="'.$fcols[$i].'"'; }
         }
         else { print 'color="white"'; }
-        print '></td>'."\n"; # <font point-size="5">&nbsp;</font>
+        print '></td>'."\n";
       }
 
       print "</tr></table>>];\n";
