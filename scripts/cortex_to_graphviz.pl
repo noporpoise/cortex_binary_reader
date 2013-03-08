@@ -19,11 +19,11 @@ sub print_usage
   }
   
   print STDERR "" .
-"Usage: ./cortex_to_graphviz.pl [--point|--flavour] <in.ctx>
+"Usage: ./cortex_to_graphviz.pl [--point|--shaded] <in.ctx>
   Prints graphviz `dot' output.  Not to be used with large graphs!
 
-  --point    Don't print kmer values, only points
-  --flavour  Print flavours
+  --point   Don't print kmer values, only points
+  --shaded  Print shades
 
   Example: ./cortex_to_graphviz.pl small.ctx > small.dot
            dot -Tpng small.dot > small.png\n";
@@ -32,7 +32,7 @@ sub print_usage
 }
 
 my $use_points = 0;
-my $print_flavours = 0;
+my $print_shades = 0;
 
 while(@ARGV > 1) {
   if($ARGV[0] =~ /^-?-p(oints?)?$/i) {
@@ -41,7 +41,7 @@ while(@ARGV > 1) {
   }
   elsif($ARGV[0] =~ /^-?-f(lavours?)?$/i) {
     shift;
-    $print_flavours = 1;
+    $print_shades = 1;
   }
   else { print_usage("Unknown option '$ARGV[0]'"); }
 }
@@ -79,33 +79,33 @@ print "digraph G {\n";
 
 my @fcols = qw(red green blue orange purple pink brown black);
 
-if($print_flavours)
+if($print_shades)
 {
   $pid = open2($in, $out, $cmdline) or die("Cannot run cmd: '$cmdline'");
 
   while(defined(my $line = <$in>))
   {
-    my ($kmer, $covgs, $edges, $flavours) = parse_ctx_line($line);
+    my ($kmer, $covgs, $edges, $shades) = parse_ctx_line($line);
     if(defined($kmer))
     {
-      if(!defined($flavours) || $flavours =~ /^\s*$/) { last; }
+      if(!defined($shades) || $shades =~ /^\s*$/) { last; }
 
-      my @flav = split('', $flavours);
+      my @flav = split('', $shades);
 
       print $kmer . ' [shape=none label=<<table ' .
-            'border="'.($flavours =~ /^\-+$/ ? '1' : '0').'" cellborder="0">
+            'border="'.($shades =~ /^\-+$/ ? '1' : '0').'" cellborder="0">
 <tr><td PORT="'.$kmer.'" colspan="'.@flav.'" cellpadding="0" cellspacing="0">
 <font face="courier" point-size="9">'.($use_points ? '.' : $kmer).'</font></td>
 </tr><tr>';
 
       for(my $i = 0; $i < @flav; $i++) {
-        print '<td fixedsize="true" width="3" height="3" style="rounded" ' .
+        print '<td fixedsize="true" width="3" height="3" ' .
               'cellpadding="0" cellspacing="0" border="1" ';
         if($flav[$i] ne '.') {
-          if($flav[$i] eq lc($flav[$i])) {
-            print 'color="'.$fcols[$i].'"';
-          }
-          else { print 'color="'.$fcols[$i].'" bgcolor="'.$fcols[$i].'"'; }
+          if($flav[$i] eq '-') { print 'bgcolor="black"'; }
+          elsif($flav[$i] eq lc($flav[$i])) { print 'style="rounded"'; }
+          else { print 'style="rounded" bgcolor="'.$fcols[$i].'"'; }
+          print ' color="'.$fcols[$i].'"';
         }
         else { print 'color="white"'; }
         print '></td>'."\n";
@@ -130,7 +130,7 @@ print "  edge [dir=both arrowhead=none arrowtail=none]\n";
 
 while(defined(my $line = <$in>))
 {
-  my ($kmer, $covgs, $edges, $flavours) = parse_ctx_line($line);
+  my ($kmer, $covgs, $edges, $shades) = parse_ctx_line($line);
   if(defined($kmer))
   {
     for(my $i = 0; $i < 4; $i++)
@@ -172,7 +172,7 @@ sub parse_ctx_line
   }
   elsif($line =~ /^([acgt]+) (\d+ )+([acgt\.]{8})(?: ([a-z\-\.]+))?$/i)
   {
-    # return: $kmer, $covgs, $edges, $flavours
+    # return: $kmer, $covgs, $edges, $shades
     return ($1, $2, $3, $4);
   }
   else
@@ -219,8 +219,8 @@ sub dump_edge
   if(($going_right && $rev1 == $rev2) || ($rev1 != $rev2 && $key1 le $key2))
   {
     # Print a coloured edge for each colour that is in both nodes
-    $key1 = $print_flavours ? "$key1:$key1:" : "$key1:";
-    $key2 = $print_flavours ? "$key2:$key2:" : "$key2:";
+    $key1 = $print_shades ? "$key1:$key1:" : "$key1:";
+    $key2 = $print_shades ? "$key2:$key2:" : "$key2:";
     print "  $key1" . ($rev1 ? 'w' : 'e') . " -> " .
              $key2  . ($rev2 ? 'e' : 'w') . "\n";
   }
