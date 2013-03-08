@@ -67,16 +67,20 @@ Usage
              means col 0: covg 6 [G]GTAAGTGCCA[T]
                    col 1: covg 4 [C]GTAAGTGCCA[A|T]
 
-      Header checks:
-        * binary version is 4, 5 or 6
-        * Kmer size is an odd number > 1
-        * number of bitfields is compatible with kmer size
-        * number of colours is > 0
-        * Strings are correct length (don't have premature \0)
-
-      Kmer checks:
-        * each kmer's top bits are all zeroed (i.e. kmer is not 'oversized')
-        * no more than one kmer is all As i.e. no multiple 'AAAAAAAA' kmers
-        * each kmer has coverage greater than zero in at least one colour
-
       Comments/bugs/requests: <turner.isaac@gmail.com>
+
+Checks
+------
+
+Header checks:
+  * binary version is 4, 5 or 6
+  * kmer size is an odd number > 1
+  * number of bitfields is compatible with kmer size
+  * number of colours is > 0
+  * strings are correct length (don't have premature \0)
+  * number shades is a power of two
+
+Kmer checks:
+  * each kmer's top bits are all zeroed (i.e. kmer is not 'oversized')
+  * no more than one kmer is all As i.e. no multiple 'AAAAAAAA' kmers
+  * each kmer has coverage greater than zero in at least one colour
