@@ -13,11 +13,6 @@
 
 
 // Calculates log2 of number since log2 is only available in some libc versions
-double Log2(double n)
-{  
-  // log(n)/log(2) is log2.  
-  return log(n) / log(2);  
-}
 #define Log2(n) (log(n) / log(2))
 
 typedef struct
@@ -27,7 +22,7 @@ typedef struct
   char remove_low_covg_kmers;
   char cleaned_against_graph;
   uint32_t remove_low_covg_supernodes_thresh;
-  uint32_t remove_low_covg_kmer_thresh;
+  uint32_t remove_low_covg_kmers_thresh;
   char* name_of_graph_clean_against;
 } CleaningInfo;
 
@@ -709,8 +704,24 @@ int main(int argc, char** argv)
       my_fread(&(cleaning_infos[i].remove_low_covg_supernodes_thresh),
                sizeof(uint32_t), 1, fh, "remove low covg supernode threshold");
     
-      my_fread(&(cleaning_infos[i].remove_low_covg_kmer_thresh),
+      my_fread(&(cleaning_infos[i].remove_low_covg_kmers_thresh),
                sizeof(uint32_t), 1, fh, "remove low covg kmer threshold");
+
+      if(!cleaning_infos[i].remove_low_covg_supernodes &&
+         cleaning_infos[i].remove_low_covg_supernodes_thresh > 0)
+      {
+        report_error("Binary header gives sample %i a cleaning threshold of "
+                     "%u for supernodes when no cleaning was performed\n",
+                     i, cleaning_infos[i].remove_low_covg_supernodes_thresh);
+      }
+
+      if(!cleaning_infos[i].remove_low_covg_kmers &&
+         cleaning_infos[i].remove_low_covg_kmers_thresh > 0)
+      {
+        report_error("Binary header gives sample %i a cleaning threshold of "
+                     "%u for kmers when no cleaning was performed\n",
+                     i, cleaning_infos[i].remove_low_covg_kmers_thresh);
+      }
 
       uint32_t name_length;
       my_fread(&name_length, sizeof(uint32_t), 1, fh, "graph name length");
@@ -773,36 +784,18 @@ int main(int argc, char** argv)
         printf("  tip clipping: %s\n",
                (cleaning_infos[i].tip_cleaning == 0 ? "no" : "yes"));
 
-        if(cleaning_infos[i].remove_low_covg_supernodes)
-        {
-          printf("  remove_low_coverage_supernodes: yes [threshold: %i]\n",
-                 cleaning_infos[i].remove_low_covg_supernodes_thresh);
-        }
-        else
-        {
-          printf("  remove_low_coverage_supernodes: no\n");
-        }
+        printf("  remove low coverage supernodes: %s [threshold: %i]\n",
+               cleaning_infos[i].remove_low_covg_supernodes ? "yes" : "no",
+               cleaning_infos[i].remove_low_covg_supernodes_thresh);
 
-        if(cleaning_infos[i].remove_low_covg_kmers)
-        {
-          printf("  remove_low_coverage_kmers: yes [threshold: %i]\n",
-                 cleaning_infos[i].remove_low_covg_kmer_thresh);
-        }
-        else
-        {
-          printf("  remove_low_coverage_kmers: no\n");
-        }
+        printf("  remove low coverage kmers: %s [threshold: %i]\n",
+               cleaning_infos[i].remove_low_covg_kmers ? "yes" : "no",
+               cleaning_infos[i].remove_low_covg_kmers_thresh);
 
-        if(cleaning_infos[i].cleaned_against_graph)
-        {
-          printf("  cleaned against graph: yes [against: '%s']\n",
-                 (cleaning_infos[i].name_of_graph_clean_against == NULL
-                    ? "" : cleaning_infos[i].name_of_graph_clean_against));
-        }
-        else
-        {
-          printf("  cleaned against graph: no\n");
-        }
+        printf("  cleaned against graph: %s [against: '%s']\n",
+               cleaning_infos[i].cleaned_against_graph ? "yes" : "no",
+               (cleaning_infos[i].name_of_graph_clean_against == NULL
+                  ? "" : cleaning_infos[i].name_of_graph_clean_against));
       }
     }
 
