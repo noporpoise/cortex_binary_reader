@@ -39,7 +39,7 @@ while(@ARGV > 1) {
     shift;
     $use_points = 1;
   }
-  elsif($ARGV[0] =~ /^-?-f(lavours?)?$/i) {
+  elsif($ARGV[0] =~ /^-?-s(hade[sd]?)?$/i) {
     shift;
     $print_shades = 1;
   }
@@ -88,12 +88,11 @@ if($print_shades)
     my ($kmer, $covgs, $edges, $shades) = parse_ctx_line($line);
     if(defined($kmer))
     {
-      if(!defined($shades) || $shades =~ /^\s*$/) { last; }
-
-      my @flav = split('', $shades);
+      my @flav = defined($shades) ? split('', $shades) : ('.');
 
       print $kmer . ' [shape=none label=<<table ' .
-            'border="'.($shades =~ /^\-+$/ ? '1' : '0').'" cellborder="0">
+            'border="'.(defined($shades) && $shades =~ /^\-+$/ ? '1' : '0').'" '.
+            'cellborder="0">
 <tr><td PORT="'.$kmer.'" colspan="'.@flav.'" cellpadding="0" cellspacing="0">
 <font face="courier" point-size="9">'.($use_points ? '.' : $kmer).'</font></td>
 </tr><tr>';
@@ -120,11 +119,10 @@ if($print_shades)
 }
 else
 {
-  print "  node [" . ($use_points ? "shape=point label=none" : "shape=ellipse") ."]\n";
+  print "  node [" . ($use_points ? "shape=point label=none" : "shape=none") ."]\n";
 }
 
 $pid = open2($in, $out, $cmdline) or die("Cannot run cmd: '$cmdline'");
-
 
 print "  edge [dir=both arrowhead=none arrowtail=none]\n";
 
@@ -133,6 +131,8 @@ while(defined(my $line = <$in>))
   my ($kmer, $covgs, $edges, $shades) = parse_ctx_line($line);
   if(defined($kmer))
   {
+    my $num_edges_printed = 0;
+
     for(my $i = 0; $i < 4; $i++)
     {
       if((my $edge = substr($edges, $i, 1)) ne ".")
@@ -140,6 +140,7 @@ while(defined(my $line = <$in>))
         my $prev_kmer = uc($edge) . substr($kmer,0,-1);
         my $right_base = substr($kmer,-1);
         dump_edge($prev_kmer, $right_base, 0);
+        $num_edges_printed++;
       }
     }
 
@@ -148,7 +149,13 @@ while(defined(my $line = <$in>))
       if((my $edge = substr($edges, $i, 1)) ne ".")
       {
         dump_edge($kmer, uc($edge), 1);
+        $num_edges_printed++;
       }
+    }
+
+    if($num_edges_printed == 0)
+    {
+      print "  ".kmer_key($kmer)."\n";
     }
   }
 }

@@ -8,6 +8,11 @@
 #include <math.h>
 #include <ctype.h> // toupper
 
+#include "stream_buffer.h"
+
+// Set buffer to 1MB
+#define BUFFER_SIZE (1<<20)
+
 #define MIN2(x,y) ((x) <= (y) ? (x) : (y))
 #define MAX2(x,y) ((x) >= (y) ? (x) : (y))
 
@@ -42,6 +47,8 @@ typedef enum
 char print_info = 1;
 char print_kmers = 0;
 char parse_kmers = 1;
+
+buffer_t *buffer;
 
 //
 // File data
@@ -79,7 +86,7 @@ unsigned long num_of_all_zero_kmers = 0;
 unsigned long num_of_oversized_kmers = 0;
 unsigned long num_of_zero_covg_kmers = 0;
 
-void report_error(const char* fmt, ...)
+static void report_error(const char* fmt, ...)
 {
   valid_file = 0;
 
@@ -90,12 +97,12 @@ void report_error(const char* fmt, ...)
   va_end(argptr);
 }
 
-unsigned long round_up_ulong(unsigned long num, unsigned long nearest)
+static unsigned long round_up_ulong(unsigned long num, unsigned long nearest)
 {
   return nearest * ((num + nearest - 1) / nearest);
 }
 
-unsigned int num_of_digits(unsigned long num)
+static unsigned int num_of_digits(unsigned long num)
 {
   unsigned int digits;
 
@@ -108,7 +115,7 @@ unsigned int num_of_digits(unsigned long num)
 // result must be long enough for result + 1 ('\0'). Max length required is:
 // strlen('18,446,744,073,709,551,615')+1 = 27
 // returns pointer to result
-char* ulong_to_str(unsigned long num, char* result)
+static char* ulong_to_str(unsigned long num, char* result)
 {
   int digits = num_of_digits(num);
   int num_commas = (digits-1) / 3;
@@ -135,9 +142,10 @@ char* ulong_to_str(unsigned long num, char* result)
   return result;
 }
 
+/*
 // result must be long enough for result + 1 ('\0'). Max length required is:
 // strlen('-9,223,372,036,854,775,808')+1 = 27
-char* long_to_str(long num, char* result)
+static char* long_to_str(long num, char* result)
 {
   if(num < 0)
   {
@@ -151,13 +159,14 @@ char* long_to_str(long num, char* result)
 
   return result;
 }
+*/
 
 // result must be long enough for result + 1 ('\0').
 // Max length required is: 26+1+decimals+1 = 28+decimals bytes
 //   strlen('-9,223,372,036,854,775,808') = 27
 //   strlen('.') = 1
 //   +1 for \0
-char* double_to_str(double num, int decimals, char* str)
+static char* double_to_str(double num, int decimals, char* str)
 {
   unsigned long whole_units = (unsigned long)num;
   num -= whole_units;
@@ -184,7 +193,7 @@ char* double_to_str(double num, int decimals, char* str)
 //   strlen(' GB') = 3
 //   strlen('.') = 1
 //   +1 for '\0'
-char* bytes_to_str(unsigned long num, int decimals, char* str)
+static char* bytes_to_str(unsigned long num, int decimals, char* str)
 {
   const unsigned int num_unit_sizes = 7;
   char *units[] = {"B", "KB", "MB", "GB", "TB", "PB", "EB"};
@@ -208,7 +217,7 @@ char* bytes_to_str(unsigned long num, int decimals, char* str)
 
 // str must be at least 32 bytes long
 // max lenth: strlen '18,446,744,073,709,551,615.0 GB' + 1 = 32 bytes
-void memory_required(unsigned long num_of_hash_entries, char* str)
+static void memory_required(unsigned long num_of_hash_entries, char* str)
 {
   // Size of each entry is rounded up to nearest 8 bytes
   unsigned long num_of_bytes
@@ -219,7 +228,7 @@ void memory_required(unsigned long num_of_hash_entries, char* str)
 }
 
 // Returns -1 on failure
-off_t get_file_size(char* filepath)
+static off_t get_file_size(char* filepath)
 {
   struct stat st;
 
@@ -232,7 +241,7 @@ off_t get_file_size(char* filepath)
   return -1;
 }
 
-void print_kmer_stats()
+static void print_kmer_stats()
 {
   char num_str[50];
 
@@ -324,16 +333,14 @@ void print_kmer_stats()
   }
 }
 
-void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
-              const char* entry_name)
+static void my_fread(FILE *fh, void *ptr, int size, const char* entry_name)
 {
-  size_t read = fread(ptr, size, nitems, stream);
-  num_bytes_read += read * size;
+  int read = fread_buf(fh, ptr, size, buffer);
 
-  if(read != nitems)
+  if(read != size)
   {
     report_error("Couldn't read '%s': expected %li; recieved: %li; (fatal)\n",
-                 entry_name, (long)nitems, (long)read);
+                 entry_name, (long)size, (long)read);
 
     if(print_kmers)
       printf("----\n");
@@ -342,21 +349,23 @@ void my_fread(void *ptr, size_t size, size_t nitems, FILE *stream,
     exit(EXIT_FAILURE);
   }
 
+  num_bytes_read += read;
+
   int err;
-  if((err = ferror(stream)) != 0)
+  if((err = ferror(fh)) != 0)
   {
     report_error("file reading error: %i\n", err);
   }
 }
 
-void print_binary(FILE* stream, uint64_t binary)
+static void print_binary(FILE* fh, uint64_t binary)
 {
   int i;
   for(i = 63; i >= 0; i--)
-    fprintf(stream, "%c", ((binary >> i) & 0x1 ? '1' : '0'));
+    fprintf(fh, "%c", ((binary >> i) & 0x1 ? '1' : '0'));
 }
 
-char binary_nucleotide_to_char(Nucleotide n)
+static char binary_nucleotide_to_char(Nucleotide n)
 {
   switch (n)
   {
@@ -370,7 +379,8 @@ char binary_nucleotide_to_char(Nucleotide n)
   }
 }
 
-char char_rev_comp(char c)
+/*
+static char char_rev_comp(char c)
 {
   switch(c)
   {
@@ -387,8 +397,9 @@ char char_rev_comp(char c)
       exit(EXIT_FAILURE);
   }
 }
+*/
 
-void binary_kmer_right_shift_one_base(uint64_t* kmer, int num_of_bitfields)
+static void binary_kmer_right_shift_one_base(uint64_t* kmer, int num_of_bitfields)
 {
   int i;
   for(i = num_of_bitfields-1; i > 0; i--)
@@ -403,7 +414,7 @@ void binary_kmer_right_shift_one_base(uint64_t* kmer, int num_of_bitfields)
 
 #define rev_nibble(x) (((x&0x1)<<3) | ((x&0x2)<<1) | ((x&0x4)>>1) | ((x&0x8)>>3))
 
-char* get_edges_str(char edges, char* kmer_colour_edge_str)
+static char* get_edges_str(char edges, char* kmer_colour_edge_str)
 {
   int i;
 
@@ -424,8 +435,8 @@ char* get_edges_str(char edges, char* kmer_colour_edge_str)
   return kmer_colour_edge_str;
 }
 
-char* binary_kmer_to_seq(uint64_t* bkmer, char * seq,
-                         int kmer_size, int num_of_bitfields)
+static char* binary_kmer_to_seq(uint64_t* bkmer, char * seq,
+                                int kmer_size, int num_of_bitfields)
 {
   uint64_t local_bkmer[num_of_bitfields];
 
@@ -451,7 +462,7 @@ char* binary_kmer_to_seq(uint64_t* bkmer, char * seq,
 
 #define has_shade(p,n)   (((p)[(n) >> 3] >> ((n) & 0x7)) & 0x1)
 
-char get_shade_char(uint8_t *shades, uint8_t *shends, int p)
+static char get_shade_char(uint8_t *shades, uint8_t *shends, int p)
 {
   char shend = has_shade(shends,p);
   char shade = has_shade(shades,p);
@@ -461,14 +472,14 @@ char get_shade_char(uint8_t *shades, uint8_t *shends, int p)
   else return '.';
 }
 
-void print_colour_shades(uint8_t *shades, uint8_t *shends)
+static void print_colour_shades(uint8_t *shades, uint8_t *shends)
 {
   size_t i;
   for(i = 0; i < num_of_shades; i++)
     putc(get_shade_char(shades, shends, i), stdout);
 }
 
-void print_usage()
+static void print_usage()
 {
   fprintf(stderr,
 "usage: cortex_bin_reader [OPTIONS] <binary.ctx>\n"
@@ -555,6 +566,8 @@ int main(int argc, char** argv)
     printf("File size: %s\n", str);
   }
 
+  buffer = buffer_new(BUFFER_SIZE);
+
   /*
   // Check sizes
   printf("-- Datatypes --\n");
@@ -574,7 +587,7 @@ int main(int argc, char** argv)
   char magic_word[7];
   magic_word[6] = '\0';
 
-  my_fread(magic_word, sizeof(char), 6, fh, "Magic word");
+  my_fread(fh, magic_word, strlen("CORTEX"), "Magic word");
 
   if(strcmp(magic_word, "CORTEX") != 0)
   {
@@ -583,10 +596,10 @@ int main(int argc, char** argv)
   }
 
   // Read version number
-  my_fread(&version, sizeof(uint32_t), 1, fh, "binary version");
-  my_fread(&kmer_size, sizeof(uint32_t), 1, fh, "kmer size");
-  my_fread(&num_of_bitfields, sizeof(uint32_t), 1, fh, "number of bitfields");
-  my_fread(&num_of_colours, sizeof(uint32_t), 1, fh, "number of colours");
+  my_fread(fh, &version, sizeof(uint32_t), "binary version");
+  my_fread(fh, &kmer_size, sizeof(uint32_t), "kmer size");
+  my_fread(fh, &num_of_bitfields, sizeof(uint32_t), "number of bitfields");
+  my_fread(fh, &num_of_colours, sizeof(uint32_t), "number of colours");
 
   if(print_info)
   {
@@ -598,8 +611,8 @@ int main(int argc, char** argv)
 
   if(version >= 7)
   {
-    my_fread(&expected_num_of_kmers, sizeof(uint64_t), 1, fh, "number of kmers");
-    my_fread(&num_of_shades, sizeof(uint32_t), 1, fh, "number of shades");
+    my_fread(fh, &expected_num_of_kmers, sizeof(uint64_t), "number of kmers");
+    my_fread(fh, &num_of_shades, sizeof(uint32_t), "number of shades");
 
     if(print_info)
     {
@@ -637,14 +650,14 @@ int main(int argc, char** argv)
   uint32_t *mean_read_lens_per_colour
     = (uint32_t*)malloc(num_of_colours*sizeof(uint32_t));
 
-  my_fread(mean_read_lens_per_colour, sizeof(uint32_t), num_of_colours, fh,
+  my_fread(fh, mean_read_lens_per_colour, sizeof(uint32_t) * num_of_colours,
            "mean read length for each colour");
 
   // Read array of total seq loaded per colour
   uint64_t *total_seq_loaded_per_colour
     = (uint64_t*)malloc(num_of_colours*sizeof(uint64_t));
 
-  my_fread(total_seq_loaded_per_colour, sizeof(uint64_t), num_of_colours, fh,
+  my_fread(fh, total_seq_loaded_per_colour, sizeof(uint64_t) * num_of_colours,
            "total sequance loaded for each colour");
 
   for(i = 0; i < num_of_colours; i++)
@@ -659,7 +672,7 @@ int main(int argc, char** argv)
     for(i = 0; i < num_of_colours; i++)
     {
       uint32_t str_length;
-      my_fread(&str_length, sizeof(uint32_t), 1, fh, "sample name length");
+      my_fread(fh, &str_length, sizeof(uint32_t), "sample name length");
 
       if(str_length == 0)
       {
@@ -668,7 +681,7 @@ int main(int argc, char** argv)
       else
       {
         sample_names[i] = (char*)malloc((str_length+1) * sizeof(char));
-        my_fread(sample_names[i], sizeof(char), str_length, fh, "sample name");
+        my_fread(fh, sample_names[i], str_length, "sample name");
         sample_names[i][str_length] = '\0';
 
         // Check sample length is as long as we were told
@@ -685,27 +698,26 @@ int main(int argc, char** argv)
     }
 
     seq_error_rates = malloc(sizeof(long double) * num_of_colours);
-    my_fread(seq_error_rates, sizeof(long double), num_of_colours, fh,
+    my_fread(fh, seq_error_rates, sizeof(long double) * num_of_colours,
              "seq error rates");
 
     cleaning_infos = (CleaningInfo*)malloc(sizeof(CleaningInfo) * num_of_colours);
 
     for(i = 0; i < num_of_colours; i++)
     {
-      my_fread(&(cleaning_infos[i].tip_cleaning), sizeof(char), 1,
-               fh, "tip cleaning");
-      my_fread(&(cleaning_infos[i].remove_low_covg_supernodes), sizeof(char), 1,
-               fh, "remove low covg supernodes");
-      my_fread(&(cleaning_infos[i].remove_low_covg_kmers), sizeof(char), 1,
-               fh, "remove low covg kmers");
-      my_fread(&(cleaning_infos[i].cleaned_against_graph), sizeof(char), 1,
-               fh, "cleaned against graph");
+      my_fread(fh, &(cleaning_infos[i].tip_cleaning), 1, "tip cleaning");
+      my_fread(fh, &(cleaning_infos[i].remove_low_covg_supernodes), 1,
+               "remove low covg supernodes");
+      my_fread(fh, &(cleaning_infos[i].remove_low_covg_kmers), 1,
+               "remove low covg kmers");
+      my_fread(fh, &(cleaning_infos[i].cleaned_against_graph), 1,
+               "cleaned against graph");
 
-      my_fread(&(cleaning_infos[i].remove_low_covg_supernodes_thresh),
-               sizeof(uint32_t), 1, fh, "remove low covg supernode threshold");
+      my_fread(fh, &(cleaning_infos[i].remove_low_covg_supernodes_thresh),
+               sizeof(uint32_t), "remove low covg supernode threshold");
     
-      my_fread(&(cleaning_infos[i].remove_low_covg_kmers_thresh),
-               sizeof(uint32_t), 1, fh, "remove low covg kmer threshold");
+      my_fread(fh, &(cleaning_infos[i].remove_low_covg_kmers_thresh),
+               sizeof(uint32_t), "remove low covg kmer threshold");
 
       if(!cleaning_infos[i].remove_low_covg_supernodes &&
          cleaning_infos[i].remove_low_covg_supernodes_thresh > 0)
@@ -724,7 +736,7 @@ int main(int argc, char** argv)
       }
 
       uint32_t name_length;
-      my_fread(&name_length, sizeof(uint32_t), 1, fh, "graph name length");
+      my_fread(fh, &name_length, sizeof(uint32_t), "graph name length");
 
       if(name_length == 0)
       {
@@ -735,8 +747,8 @@ int main(int argc, char** argv)
         cleaning_infos[i].name_of_graph_clean_against
           = (char*)malloc((name_length + 1) * sizeof(char));
 
-        my_fread(cleaning_infos[i].name_of_graph_clean_against, sizeof(char),
-                 name_length, fh, "graph name length");
+        my_fread(fh, cleaning_infos[i].name_of_graph_clean_against,
+                 name_length, "graph name length");
 
         cleaning_infos[i].name_of_graph_clean_against[name_length] = '\0';
       
@@ -803,7 +815,7 @@ int main(int argc, char** argv)
   }
 
   // Read magic word at the end of header
-  my_fread(magic_word, sizeof(char), 6, fh, "magic word (end)");
+  my_fread(fh, magic_word, strlen("CORTEX"), "magic word (end)");
 
   if(strcmp(magic_word, "CORTEX") != 0)
   {
@@ -873,27 +885,26 @@ int main(int argc, char** argv)
   // the file
   size_t bytes_read;
 
-  while((bytes_read = fread(kmer, 1, num_bytes_per_bkmer, fh)) > 0)
+  while((bytes_read = fread_buf(fh, kmer, num_bytes_per_bkmer, buffer)) > 0)
   {
-    num_bytes_read += bytes_read;
-
     if(bytes_read != num_bytes_per_bkmer)
     {
       report_error("unusual extra bytes [%i] at the end of the file\n",
                    (int)bytes_read);
       break;
     }
+    num_bytes_read += bytes_read;
 
-    my_fread(covgs, sizeof(uint32_t), num_of_colours, fh, "kmer covg");
-    my_fread(edges, sizeof(uint8_t), num_of_colours, fh, "kmer edges");
+    my_fread(fh, covgs, sizeof(uint32_t) * num_of_colours, "kmer covg");
+    my_fread(fh, edges, sizeof(uint8_t) * num_of_colours, "kmer edges");
 
     if(version >= 7)
     {
       uint8_t *shades = shade_data, *shends = shend_data;
       for(i = 0; i < num_of_colours; i++)
       {
-        my_fread(shades, sizeof(uint8_t), shade_bytes, fh, "shades");
-        my_fread(shends, sizeof(uint8_t), shade_bytes, fh, "shade ends");
+        my_fread(fh, shades, sizeof(uint8_t) * shade_bytes, "shades");
+        my_fread(fh, shends, sizeof(uint8_t) * shade_bytes, "shade ends");
         shades += shade_bytes;
         shends += shade_bytes;
       }
@@ -996,7 +1007,7 @@ int main(int argc, char** argv)
   if(num_of_kmers_read != expected_num_of_kmers)
   {
     report_error("Expected %lu kmers, read %lu\n",
-                 num_of_kmers_read, expected_num_of_kmers);
+                 expected_num_of_kmers, num_of_kmers_read);
   }
 
   if(print_kmers && print_info)
@@ -1030,6 +1041,8 @@ int main(int argc, char** argv)
   free(edges);
   free(shade_data);
   free(shend_data);
+
+  buffer_free(buffer);
 
   if((print_kmers || parse_kmers) && print_info)
   {
