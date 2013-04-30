@@ -6,10 +6,11 @@ use warnings;
 use File::Basename;
 use IPC::Open2;
 
-my %complement = ('a' => 't', 'A' => 'T',
-                  'c' => 'g', 'C' => 'G',
-                  'g' => 'c', 'G' => 'C',
-                  't' => 'a', 'T' => 'A');
+# Use current directory to find modules
+use FindBin;
+use lib $FindBin::Bin;
+
+use CortexGraph;
 
 sub print_usage
 {
@@ -19,11 +20,12 @@ sub print_usage
   }
   
   print STDERR "" .
-"Usage: ./cortex_to_graphviz.pl [--point|--shaded] <in.ctx>
+"Usage: ./cortex_to_graphviz.pl [--point|--shaded|--simplify] <in.ctx>
   Prints graphviz `dot' output.  Not to be used with large graphs!
 
-  --point   Don't print kmer values, only points
-  --shaded  Print shades
+  --point    Don't print kmer values, only points
+  --shaded   Print shades
+  --simplify Simplify supernodes
 
   Example: ./cortex_to_graphviz.pl small.ctx > small.dot
            dot -Tpng small.dot > small.png\n";
@@ -33,22 +35,27 @@ sub print_usage
 
 my $use_points = 0;
 my $print_shades = 0;
+my $simplify = 0;
 
 while(@ARGV > 1) {
   if($ARGV[0] =~ /^-?-p(oints?)?$/i) {
     shift;
     $use_points = 1;
   }
-  elsif($ARGV[0] =~ /^-?-s(hade[sd]?)?$/i) {
+  elsif($ARGV[0] =~ /^-?-shade[sd]??$/i) {
     shift;
     $print_shades = 1;
+  }
+  elsif($ARGV[0] =~ /^-?-simplify$/i) {
+    shift;
+    $simplify = 1;
   }
   else { print_usage("Unknown option '$ARGV[0]'"); }
 }
 
-if(@ARGV != 1)
-{
-  print_usage();
+if(@ARGV != 1) { print_usage(); }
+if($print_shades && $simplify) {
+  print_usage("Cannot specify --shaded and --simplify together");
 }
 
 my $file = shift;
@@ -122,50 +129,134 @@ else
   print "  node [" . ($use_points ? "shape=point label=none" : "shape=none") ."]\n";
 }
 
-$pid = open2($in, $out, $cmdline) or die("Cannot run cmd: '$cmdline'");
-
 print "  edge [dir=both arrowhead=none arrowtail=none]\n";
 
-while(defined(my $line = <$in>))
+$pid = open2($in, $out, $cmdline) or die("Cannot run cmd: '$cmdline'");
+
+if($simplify)
 {
-  my ($kmer, $covgs, $edges, $shades) = parse_ctx_line($line);
-  if(defined($kmer))
+  my $graph = new CortexGraph();
+
+  # Construct graph
+  while(defined(my $line = <$in>))
   {
-    my $num_edges_printed = 0;
+    my ($kmer, $covgs, $edges, $shades) = parse_ctx_line($line);
+    $graph->add_kmer($kmer);
 
-    for(my $i = 0; $i < 4; $i++)
-    {
-      if((my $edge = substr($edges, $i, 1)) ne ".")
-      {
-        my $prev_kmer = uc($edge) . substr($kmer,0,-1);
-        my $right_base = substr($kmer,-1);
-        dump_edge($prev_kmer, $right_base, 0);
-        $num_edges_printed++;
-      }
+    my @edges_arr = split('', uc($edges));
+
+    for my $prev_edge (grep {$_ ne '.'} @edges_arr[0..3]) {
+      $graph->add_edges_between($prev_edge.substr($kmer,0,-1), $kmer);
     }
 
-    for(my $i = 4; $i < 8; $i++)
-    {
-      if((my $edge = substr($edges, $i, 1)) ne ".")
-      {
-        dump_edge($kmer, uc($edge), 1);
-        $num_edges_printed++;
-      }
+    for my $next_edge (grep {$_ ne '.'} @edges_arr[4..7]) {
+      $graph->add_edges_between($kmer,substr($kmer,1).$next_edge);
+    }
+  }
+
+  # $graph->dump();
+  # exit;
+
+  # Get kmer size
+  my $kmer_size = $graph->get_kmer_size();
+
+  # print "kmer size: $kmer_size\n";
+
+  # Simplify graph into supernodes
+  # Hash of edge kmers -> supernodes
+  my %super_graph = ();
+  my @supernodes = ();
+
+  for my $key (keys %$graph) {
+    if(!defined($graph->{$key}->{'visited'})) {
+      my $contig = $graph->get_supernode($key);
+      $graph->mark_kmers_visited($contig);
+      my $supernode = {'seq' => $contig};
+      push(@supernodes, $supernode);
+      my $key0 = kmer_key(substr($contig, 0, $kmer_size));
+      my $key1 = kmer_key(substr($contig, -$kmer_size));
+      $super_graph{$key0} = $supernode;
+      $super_graph{$key1} = $supernode;
+    }
+  }
+
+  # Print nodes
+  for my $supernode (@supernodes)
+  {
+    print "  $supernode->{'seq'}\n";
+  }
+
+  # Print edges
+  for my $supernode (@supernodes)
+  {
+    my $kmer0 = substr($supernode->{'seq'}, 0, $kmer_size);
+    my $kmer1 = substr($supernode->{'seq'}, -$kmer_size);
+    my ($key0, $key1) = map {kmer_key($_)} ($kmer0, $kmer1);
+    my $reverse0 = get_orientation($kmer0, $key0);
+    my $reverse1 = get_orientation($kmer1, $key1);
+
+    my @prev_edges = $graph->get_edges($key0,!$reverse0);
+    my @next_edges = $graph->get_edges($key1,$reverse1);
+
+    # print "@prev_edges:$kmer0  $kmer1:@next_edges\n";
+
+    for my $next (@next_edges) {
+      my $kmer = substr($supernode->{'seq'},-$kmer_size+1).$next;
+      my $next_supernode = $super_graph{kmer_key($kmer)};
+      print_supernode($supernode, $next, $next_supernode, $kmer, 1);
     }
 
-    if($num_edges_printed == 0)
+    for my $prev (@prev_edges) {
+      my $kmer = revcmp($prev).substr($supernode->{'seq'},0,$kmer_size-1);
+      my $prev_supernode = $super_graph{kmer_key($kmer)};
+      print_supernode($supernode, $prev, $prev_supernode, $kmer, 0);
+    }
+  }
+}
+else
+{
+  while(defined(my $line = <$in>))
+  {
+    my ($kmer, $covgs, $edges, $shades) = parse_ctx_line($line);
+    if(defined($kmer))
     {
-      print "  ".kmer_key($kmer)."\n";
+      my $num_edges_printed = 0;
+
+      for(my $i = 0; $i < 4; $i++)
+      {
+        if((my $edge = substr($edges, $i, 1)) ne ".")
+        {
+          my $prev_kmer = uc($edge) . substr($kmer,0,-1);
+          my $right_base = substr($kmer,-1);
+          dump_edge($prev_kmer, $right_base, 0);
+          $num_edges_printed++;
+        }
+      }
+
+      for(my $i = 4; $i < 8; $i++)
+      {
+        if((my $edge = substr($edges, $i, 1)) ne ".")
+        {
+          dump_edge($kmer, uc($edge), 1);
+          $num_edges_printed++;
+        }
+      }
+
+      if($num_edges_printed == 0)
+      {
+        print "  ".kmer_key($kmer)."\n";
+      }
     }
   }
 }
 
-print "}\n";
-
 close($in);
 close($out);
 
+print "}\n";
+
 waitpid($pid, 1);
+
 
 sub parse_ctx_line
 {
@@ -190,22 +281,30 @@ sub parse_ctx_line
   }
 }
 
-sub kmer_key
+sub print_supernode
 {
-  my ($kmer) = @_;
-  my $kmer_revcmp = revcmp($kmer);
-  return $kmer lt $kmer_revcmp ? $kmer : $kmer_revcmp;
-}
+  my ($supernode,$rbase,$next_supernode,$kmer0,$going_right) = @_;
 
-sub revcmp
-{
-  my ($seq) = @_;
-  for(my $i = 0; $i < length($seq); $i++)
+  my $kmer_size = length($kmer0);
+
+  my $kmer1a = substr($next_supernode->{'seq'}, 0, $kmer_size);
+  my $kmer1b = substr($next_supernode->{'seq'}, -$kmer_size);
+  my ($key0,$key1a,$key1b) = map {kmer_key($_)} ($kmer0, $kmer1a, $kmer1b);
+
+  my ($kmer1, $key1);
+  if($key0 eq $key1a) { $kmer1 = $kmer1a; $key1 = $key1a; }
+  elsif($key0 eq $key1b) { $kmer1 = $kmer1b; $key1 = $key1b; }
+  else { die("Mismatch in supernode edges"); }
+
+  my $arrive_left = $kmer0 eq ($going_right ? $kmer1a : revcmp($kmer1a));
+
+  if(($supernode->{'seq'} lt $next_supernode->{'seq'}) ||
+     ($supernode->{'seq'} le $next_supernode->{'seq'} &&
+      ($arrive_left != $going_right || $arrive_left && $going_right)))
   {
-    my $b = substr($seq, $i, 1);
-    substr($seq, $i, 1) = $complement{$b};
+    print "  $supernode->{'seq'}:" . ($going_right ? 'e' : 'w') . " -> " .
+             "$next_supernode->{'seq'}:"  . ($arrive_left ? 'w' : 'e') . "\n";
   }
-  return reverse($seq);
 }
 
 sub dump_edge
