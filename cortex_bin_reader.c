@@ -142,25 +142,6 @@ static char* ulong_to_str(unsigned long num, char* result)
   return result;
 }
 
-/*
-// result must be long enough for result + 1 ('\0'). Max length required is:
-// strlen('-9,223,372,036,854,775,808')+1 = 27
-static char* long_to_str(long num, char* result)
-{
-  if(num < 0)
-  {
-    result[0] = '-';
-    ulong_to_str(-num, result+1);
-  }
-  else
-  {
-    ulong_to_str(num, result);
-  }
-
-  return result;
-}
-*/
-
 // result must be long enough for result + 1 ('\0').
 // Max length required is: 26+1+decimals+1 = 28+decimals bytes
 //   strlen('-9,223,372,036,854,775,808') = 27
@@ -217,7 +198,7 @@ static char* bytes_to_str(unsigned long num, int decimals, char* str)
 
 // str must be at least 32 bytes long
 // max lenth: strlen '18,446,744,073,709,551,615.0 GB' + 1 = 32 bytes
-static void memory_required(unsigned long num_of_hash_entries, char* str)
+static void set_memory_required_str(unsigned long num_of_hash_entries, char* str)
 {
   // Size of each entry is rounded up to nearest 8 bytes
   unsigned long num_of_bytes
@@ -319,8 +300,8 @@ static void print_kmer_stats()
     char min_mem_required[32];
     char rec_mem_required[32];
 
-    memory_required(kmer_count, min_mem_required);
-    memory_required(hash_entries, rec_mem_required);
+    set_memory_required_str(kmer_count, min_mem_required);
+    set_memory_required_str(hash_entries, rec_mem_required);
 
     printf("Memory required: %s\n", min_mem_required);
     printf("Memory suggested: --mem_width %lu --mem_height %lu\n",
@@ -378,26 +359,6 @@ static char binary_nucleotide_to_char(Nucleotide n)
       exit(EXIT_FAILURE);
   }
 }
-
-/*
-static char char_rev_comp(char c)
-{
-  switch(c)
-  {
-    case 'T': return 'A';
-    case 'G': return 'C';
-    case 'C': return 'G';
-    case 'A': return 'T';
-    case 't': return 'a';
-    case 'g': return 'c';
-    case 'c': return 'g';
-    case 'a': return 't';
-    default:
-      fprintf(stderr, "Non existent char nucleotide %c\n", c);
-      exit(EXIT_FAILURE);
-  }
-}
-*/
 
 static void binary_kmer_right_shift_one_base(uint64_t* kmer, int num_of_bitfields)
 {
