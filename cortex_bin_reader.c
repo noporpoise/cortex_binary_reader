@@ -331,12 +331,6 @@ static void my_fread(FILE *fh, void *ptr, int size, const char* entry_name)
   }
 
   num_bytes_read += read;
-
-  int err;
-  if((err = ferror(fh)) != 0)
-  {
-    report_error("file reading error: %i\n", err);
-  }
 }
 
 static void print_binary(FILE* fh, uint64_t binary)
@@ -577,7 +571,8 @@ int main(int argc, char** argv)
 
     if(print_info)
     {
-      printf("kmers: %lu\n", (unsigned long)expected_num_of_kmers);
+      char tmp[256];
+      printf("kmers: %s\n", ulong_to_str(expected_num_of_kmers,tmp));
       printf("shades: %i\n", (int)num_of_shades);
     }
   }

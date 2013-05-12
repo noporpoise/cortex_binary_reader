@@ -87,6 +87,8 @@ my ($pid, $in, $out);
 
 print "digraph G {\n";
 print "  edge [dir=both arrowhead=none arrowtail=none]\n";
+print "  node [".($use_points ? "shape=point, label=none" : "shape=none").", ".
+      "fontname=courier, fontsize=9]\n";
 
 if($simplify)
 {
@@ -104,11 +106,11 @@ if($simplify)
     my @edges_arr = split('', uc($edges));
 
     for my $prev_edge (grep {$_ ne '.'} @edges_arr[0..3]) {
-      $graph->add_edges_between($prev_edge.substr($kmer,0,-1), $kmer);
+      $graph->add_edges_between(uc($prev_edge).substr($kmer,0,-1), $kmer);
     }
 
     for my $next_edge (grep {$_ ne '.'} @edges_arr[4..7]) {
-      $graph->add_edges_between($kmer,substr($kmer,1).$next_edge);
+      $graph->add_edges_between($kmer, substr($kmer,1).$next_edge);
     }
   }
 
@@ -157,7 +159,7 @@ if($simplify)
   'border="'.(defined($shades0) && $shades0 =~ /^\-+$/ ? '1' : '0').'" '.
   'cellborder="0" cellpadding="0" cellspacing="0">
   <tr><td PORT="top" colspan="'.$num_of_cols.'" cellpadding="0" cellspacing="0" border="0">
-  <font face="courier" point-size="9">'.($use_points ? '.' : $seq).'</font></td>
+  '.($use_points ? '.' : $seq).'</td>
   </tr><tr>';
 
       # print first kmer shades
@@ -203,7 +205,7 @@ if($simplify)
         }
 
         # Print middle kmer shades
-        print '<td fixedsize="false" bgcolor="gray"></td>'."\n";
+        print '<td>|</td>'."\n";
         print_kmer_shades($shades1);
       }
 
@@ -211,7 +213,7 @@ if($simplify)
         # Print last kmer shades
         my $kmer2 = substr($seq,-$kmer_size);
         my $shades2 = $graph->{kmer_key($kmer2)}->{'shades'};
-        print '<td fixedsize="false" bgcolor="gray"></td>'."\n";
+        print '<td>|</td>'."\n";
         print_kmer_shades($shades2);
       }
 
@@ -254,6 +256,7 @@ if($simplify)
 }
 else
 {
+  # Not 'simplifying' contigs
   if($print_shades)
   {
     $pid = open2($in, $out, $cmdline) or die("Cannot run cmd: '$cmdline'");
@@ -268,7 +271,7 @@ else
               'border="'.(defined($shades) && $shades =~ /^\-+$/ ? '1' : '0').'" '.
               'cellborder="0">
   <tr><td PORT="top" colspan="'.$num_shades.'" cellpadding="0" cellspacing="0">
-  <font face="courier" fixedsize="true" width="'.(9*length($kmer)).'" point-size="9">'.($use_points ? '.' : $kmer).'</font></td>
+  '.($use_points ? '.' : $kmer).'</td>
   </tr><tr>';
 
         print_kmer_shades($shades);
@@ -279,10 +282,6 @@ else
 
     close($in);
     close($out);
-  }
-  else
-  {
-    print "  node [" . ($use_points ? "shape=point label=none" : "shape=none") ."]\n";
   }
 
   $pid = open2($in, $out, $cmdline) or die("Cannot run cmd: '$cmdline'");

@@ -14,7 +14,7 @@ From version | datatype | no. elements | Notes
 4 | uint32_t |    1   | number of uint64_t (64 bit words) encoding a kmer (<W>)
 4 | uint32_t |    1   | number of colours (<cols>)
 7 | uint64_t |    1   | number of kmers in this binary (<kmers>)
-7 | uint32_t |    1   | number of path flavours
+7 | uint32_t |    1   | number of shades
 4 | uint32_t | <cols> | mean read length for each colour
 4 | uint64_t | <cols> | total sequence loaded into each colour
 --------------------------------------------------------------------------------
@@ -50,16 +50,16 @@ From version | datatype | no. elements | Notes
   ------------------------------------------------------------------------------
    Kmer path info (repeated <col> times)
   ------------------------------------------------------------------------------
-  7 | uint8_t | <P> | Path colours (<P> = roundup(<paths>/8))
+  7 | uint8_t | <P> | Path colours (<P> = <shades>/8)
   7 | uint8_t | <P> | Path ends
 --------------------------------------------------------------------------------
 
 Changes:
 
 Added:
-uint32_t    |    1   | number of path flavours (<paths>; <P> = roundup(<paths>/8))
+uint32_t    |    1   | number of shades (<shades>; <P> = <shades>/8)
 uint64_t    |    1   | number of kmers in this binary (<kmers>)
-uint8_t     |   <P>  | Path colours (<P> = roundup(<paths>/8))
+uint8_t     |   <P>  | Path colours (<P> = <shades>/8)
 uint8_t     |   <P>  | Path ends
 
 `char` written as uint8_t
