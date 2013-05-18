@@ -95,22 +95,28 @@ if($simplify)
   $pid = open2($in, $out, $cmdline) or die("Cannot run cmd: '$cmdline'");
 
   my $graph = new CortexGraph();
+  my $num_cols;
 
   # Construct graph
   while(defined(my $line = <$in>))
   {
-    my ($kmer, $covgs, $edges, $shades) = parse_ctx_line($line);
+    my ($kmer, $covgs, $edges, $shades);
+    ($kmer, $covgs, $edges, $shades, $num_cols) = parse_ctx_line($line);
+
     $graph->add_kmer($kmer);
     $graph->{$kmer}->{'shades'} = $shades;
 
-    my @edges_arr = split('', uc($edges));
+    for(my $i = 0; $i < $num_cols; $i++)
+    {
+      my @edges_arr = split('', uc($edges->[$i]));
 
-    for my $prev_edge (grep {$_ ne '.'} @edges_arr[0..3]) {
-      $graph->add_edges_between(uc($prev_edge).substr($kmer,0,-1), $kmer);
-    }
+      for my $prev_edge (grep {$_ ne '.'} @edges_arr[0..3]) {
+        $graph->add_edges_between(uc($prev_edge).substr($kmer,0,-1), $kmer);
+      }
 
-    for my $next_edge (grep {$_ ne '.'} @edges_arr[4..7]) {
-      $graph->add_edges_between($kmer, substr($kmer,1).$next_edge);
+      for my $next_edge (grep {$_ ne '.'} @edges_arr[4..7]) {
+        $graph->add_edges_between($kmer, substr($kmer,1).$next_edge);
+      }
     }
   }
 
@@ -146,78 +152,84 @@ if($simplify)
     for my $supernode (@supernodes)
     {
       my $seq = $supernode->{'seq'};
-      my $kmer0 = substr($seq,0,$kmer_size);
+      my $kmer0 = substr($seq, 0, $kmer_size);
       my $shades0 = $graph->{kmer_key($kmer0)}->{'shades'};
-
 
       my $kmer_len = length($seq)+1-$kmer_size;
       my $num_shaded_nodes = $kmer_len < 3 ? $kmer_len : 3;
-      my $num_of_shades = length($shades0);
-      my $num_of_cols = $num_shaded_nodes*$num_of_shades+($num_shaded_nodes-1);
+      my $num_of_shades = defined($shades0) ? length($shades0->[0]) : 0;
+      my $num_of_columns = $num_shaded_nodes*$num_of_shades+($num_shaded_nodes-1);
 
       print $seq . ' [shape=none label=<<table ' .
   'border="'.(defined($shades0) && $shades0 =~ /^\-+$/ ? '1' : '0').'" '.
   'cellborder="0" cellpadding="0" cellspacing="0">
-  <tr><td PORT="top" colspan="'.$num_of_cols.'" cellpadding="0" cellspacing="0" border="0">
+  <tr><td PORT="top" colspan="'.$num_of_columns.'" cellpadding="0" cellspacing="0" border="0">
   '.($use_points ? '.' : $seq).'</td>
-  </tr><tr>';
+  </tr>';
 
-      # print first kmer shades
-      print_kmer_shades($shades0);
+      for(my $i = 0; $i < $num_cols; $i++)
+      {
+        # print first kmer shades
+        print '<tr>';
+        print_kmer_shades($shades0->[$i]);
 
-      if($num_shaded_nodes == 3) {
-        # Get middle shades
-        my $kmer1 = substr($seq,1,$kmer_size);
-        my $shades1 = $graph->{kmer_key($kmer1)}->{'shades'};
+        if($num_shaded_nodes == 3) {
+          # Get middle shades
+          my $kmer1 = substr($seq,1,$kmer_size);
+          my $shades1 = $graph->{kmer_key($kmer1)}->{'shades'};
 
-        for(my $i = 2; $i < length($seq)-$kmer_size; $i++)
-        {
-          $kmer1 = substr($seq,$i,$kmer_size);
-          my $tmp_shades = $graph->{kmer_key($kmer1)}->{'shades'};
-
-          # Merge if not equal
-          if($tmp_shades ne $shades1)
+          for(my $j = 2; $j < length($seq)-$kmer_size; $j++)
           {
-            if(!$shade_mismatch) {
-              warn("Shades mismatch within a supernode");
-              $shade_mismatch = 1;
-            }
+            $kmer1 = substr($seq,$j,$kmer_size);
+            my $tmp_shades = $graph->{kmer_key($kmer1)}->{'shades'};
 
-            # Merge
-            for(my $j = 0; $j < length($shades1); $i++) {
-              my ($a,$b) = map {substr($_,$j,1)} ($shades1,$tmp_shades);
-              my ($uc,$lc) = (0,0);
-              if($a ne '.') {
-                if($a eq uc($a)) {$uc = $a;}
-                if($a eq lc($a)) {$lc = $a;}
-              }
-              if($b ne '.') {
-                if($b eq uc($b)) {$uc = $b;}
-                if($b eq lc($b)) {$lc = $b;}
-              }
-              my $c = '-';
-              if($uc && $lc) { $c = '-'; }
-              elsif($uc) { $c = $uc; }
-              elsif($lc) { $c = $lc; }
-              substr($shades1,$j,1) = $c;
+            # Merge if not equal
+            if($tmp_shades->[$i] ne $shades1->[$i])
+            {
+              die("Shades mismatch within a supernode");
+              # if(!$shade_mismatch) {
+              #   # warn("Shades mismatch within a supernode");
+              #   $shade_mismatch = 1;
+              # }
+
+              # # Merge
+              # for(my $k = 0; $k < length($shades1); $k++) {
+              #   my ($a,$b) = map {substr($_,$j,1)} ($shades1,$tmp_shades);
+              #   my ($uc,$lc) = (0,0);
+              #   if($a ne '.') {
+              #     if($a eq uc($a)) {$uc = $a;}
+              #     if($a eq lc($a)) {$lc = $a;}
+              #   }
+              #   if($b ne '.') {
+              #     if($b eq uc($b)) {$uc = $b;}
+              #     if($b eq lc($b)) {$lc = $b;}
+              #   }
+              #   my $c = '-';
+              #   if($uc && $lc) { $c = '-'; }
+              #   elsif($uc) { $c = $uc; }
+              #   elsif($lc) { $c = $lc; }
+              #   substr($shades1,$j,1) = $c;
+              # }
             }
           }
+
+          # Print middle kmer shades
+          print '<td>|</td>'."\n";
+          print_kmer_shades($shades1->[$i]);
         }
 
-        # Print middle kmer shades
-        print '<td>|</td>'."\n";
-        print_kmer_shades($shades1);
+        if($num_shaded_nodes > 1) {
+          # Print last kmer shades
+          my $kmer2 = substr($seq,-$kmer_size);
+          my $shades2 = $graph->{kmer_key($kmer2)}->{'shades'};
+          print '<td>|</td>'."\n";
+          print_kmer_shades($shades2->[$i]);
+        }
+
+        print "</tr>\n";
       }
 
-      if($num_shaded_nodes > 1) {
-        # Print last kmer shades
-        my $kmer2 = substr($seq,-$kmer_size);
-        my $shades2 = $graph->{kmer_key($kmer2)}->{'shades'};
-        print '<td>|</td>'."\n";
-        print_kmer_shades($shades2);
-      }
-
-      print "</tr></table>>];\n";
+      print "</table>>];\n";
     }
   }
   else
@@ -263,20 +275,24 @@ else
 
     while(defined(my $line = <$in>))
     {
-      my ($kmer, $covgs, $edges, $shades) = parse_ctx_line($line);
+      my ($kmer, $covgs, $edges, $shades, $num_cols) = parse_ctx_line($line);
       if(defined($kmer))
       {
-        my $num_shades = defined($shades) ? length($shades) : 1;
+        my $num_shades = defined($shades) ? length($shades->[0]) : 1;
         print $kmer . ' [shape=none label=<<table ' .
               'border="'.(defined($shades) && $shades =~ /^\-+$/ ? '1' : '0').'" '.
               'cellborder="0">
-  <tr><td PORT="top" colspan="'.$num_shades.'" cellpadding="0" cellspacing="0">
-  '.($use_points ? '.' : $kmer).'</td>
-  </tr><tr>';
+<tr><td PORT="top" colspan="'.$num_shades.'" cellpadding="0" cellspacing="0">
+'.($use_points ? '.' : $kmer)."</td></tr>\n";
 
-        print_kmer_shades($shades);
+        for(my $i = 0; $i < $num_cols; $i++)
+        {
+          print '<tr>';
+          print_kmer_shades($shades->[$i]);
+          print "</tr>\n";
+        }
 
-        print "</tr></table>>];\n";
+        print "</table>>];\n";
       }
     }
 
@@ -288,34 +304,37 @@ else
 
   while(defined(my $line = <$in>))
   {
-    my ($kmer, $covgs, $edges, $shades) = parse_ctx_line($line);
+    my ($kmer, $covgs, $edges, $shades, $num_cols) = parse_ctx_line($line);
     if(defined($kmer))
     {
       my $num_edges_printed = 0;
 
-      for(my $i = 0; $i < 4; $i++)
+      for(my $i = 0; $i < $num_cols; $i++)
       {
-        if((my $edge = substr($edges, $i, 1)) ne ".")
+        for(my $base = 0; $base < 4; $base++)
         {
-          my $prev_kmer = uc($edge) . substr($kmer,0,-1);
-          my $right_base = substr($kmer,-1);
-          dump_edge($prev_kmer, $right_base, 0);
-          $num_edges_printed++;
+          if((my $edge = substr($edges->[$i], $base, 1)) ne ".")
+          {
+            my $prev_kmer = uc($edge) . substr($kmer,0,-1);
+            my $right_base = substr($kmer,-1);
+            dump_edge($prev_kmer, $right_base, 0);
+            $num_edges_printed++;
+          }
         }
-      }
 
-      for(my $i = 4; $i < 8; $i++)
-      {
-        if((my $edge = substr($edges, $i, 1)) ne ".")
+        for(my $base = 4; $base < 8; $base++)
         {
-          dump_edge($kmer, uc($edge), 1);
-          $num_edges_printed++;
+          if((my $edge = substr($edges->[$i], $base, 1)) ne ".")
+          {
+            dump_edge($kmer, uc($edge), 1);
+            $num_edges_printed++;
+          }
         }
-      }
 
-      if($num_edges_printed == 0)
-      {
-        print "  ".kmer_key($kmer)."\n";
+        if($num_edges_printed == 0)
+        {
+          print "  ".kmer_key($kmer)."\n";
+        }
       }
     }
   }
@@ -332,17 +351,25 @@ waitpid($pid, 1);
 sub parse_ctx_line
 {
   my ($line) = @_;
-
   chomp($line);
+  my @columns = split(' ', $line);
+
   if($line =~ /Error/i)
   {
     print STDERR "$line\n";
     return undef;
   }
-  elsif($line =~ /^([acgt]+) (\d+ )+([acgt\.]{8})(?: ([a-z\-\.]+))?$/i)
+
+  my ($kmer, $num_cols);
+  my @covgs;
+  my @edges;
+  my @shades;
+
+  if($line =~ /^([acgt]+) ((?: ?\d+)+)( [a-z\.]+)+$/i)
   {
-    # return: $kmer, $covgs, $edges, $shades
-    return ($1, $2, $3, $4);
+    my $covgtxt = $2;
+    @covgs = split(' ', $covgtxt);
+    $num_cols = scalar(@covgs);
   }
   else
   {
@@ -350,6 +377,23 @@ sub parse_ctx_line
     print STDERR "  $line\n";
     exit(-1);
   }
+
+# <kmer> <covg0> <covg1> <edges0> <edges1> <shades0> <shades1>
+
+  $kmer = $columns[0];
+  @edges = @columns[$num_cols+1..2*$num_cols];
+
+  if(2*$num_cols+1 == @columns) {
+    @shades = () x $num_cols;
+  } else {
+    @shades = @columns[2*$num_cols+1..$#columns];
+  }
+
+  # print STDERR "kmer:$kmer covgs:".join(';', @covgs)."; ".
+  #              "edges:".join(';', @edges)."; ".
+  #              "shades:".join(';',@shades).";\n";
+
+  return ($kmer, \@covgs, \@edges, \@shades, $num_cols);
 }
 
 sub print_kmer_shades
@@ -364,8 +408,8 @@ sub print_kmer_shades
     if($sharr[$i] ne '.') {
       if($sharr[$i] eq '-') { print 'bgcolor="black"'; }
       elsif($sharr[$i] eq lc($sharr[$i])) { print 'style="rounded"'; }
-      else { print 'style="rounded" bgcolor="'.$cols[$i].'"'; }
-      print ' color="'.$cols[$i].'"';
+      else { print 'style="rounded" bgcolor="'.$cols[$i % @cols].'"'; }
+      print ' color="'.$cols[$i % @cols].'"';
     }
     else { print 'color="white"'; }
     print '></td>'."\n";
