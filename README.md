@@ -28,6 +28,11 @@ To only print kmers:
 
     cortex_bin_reader --print_kmers in.ctx
 
+Print kmers and their total covg:
+
+  NUM_COLS=6
+  ./cortex_bin_reader --print_kmers in.ctx | awk '{for(i=2;i<="$(($NUM_COLS+1))";i++) t+=$i; print $1" "t; t=0}'
+
 To sum coverage with awk
 
     cortex_bin_reader --print_kmers in.ctx | awk '{total += $2} END { print total}'

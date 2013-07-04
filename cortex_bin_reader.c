@@ -1028,7 +1028,7 @@ int main(int argc, char** argv)
   {
     printf("----\n");
     if(num_warnings > 0 || num_errors > 0)
-      printf("Warning: %u; Errors: %u\n", num_warnings, num_errors);
+      printf("Warnings: %u; Errors: %u\n", num_warnings, num_errors);
     if(num_errors == 0)
       printf(num_warnings ? "Binary may be ok\n" : "Binary is valid\n");
   }
