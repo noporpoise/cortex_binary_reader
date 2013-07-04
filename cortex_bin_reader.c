@@ -16,9 +16,32 @@
 #define MIN2(x,y) ((x) <= (y) ? (x) : (y))
 #define MAX2(x,y) ((x) >= (y) ? (x) : (y))
 
-
 // Calculates log2 of number since log2 is only available in some libc versions
 #define Log2(n) (log(n) / log(2))
+
+const char usage[] =
+"usage: cortex_bin_reader [OPTIONS] <binary.ctx>\n"
+"  Prints out header information and kmers for cortex_var binary files.  Runs\n"
+"  several checks to test if binary file is valid. \n"
+"\n"
+"  OPTIONS:\n"
+"  --print_info    Print header info and exit. If used on its own kmers are not\n"
+"                  printed or checked (fast option).\n"
+"\n"
+"  --print_kmers   Print each kmer. If used on its own, other information\n"
+"                  (i.e. headers) is not printed out\n"
+"\n"
+"  --parse_kmers   Print header info, parse but don't print kmers [default]\n"
+"\n"
+"  If no options are specified '--parse_kmers --print_info' is used.\n"
+"\n"
+"  Kmers are printed in the order they are listed in the file. \n"
+"  For each kmer we print: <kmer_seq> <covg_in_col0 ...> <edges_in_col0 ...>\n"
+"    e.g. GTAAGTGCCA 6 4 ..g....T .c..A..T\n"
+"         means col 0: covg 6 [G]GTAAGTGCCA[T]\n"
+"               col 1: covg 4 [C]GTAAGTGCCA[A|T]\n"
+"\n"
+"  Comments/bugs/requests: <turner.isaac@gmail.com>\n";
 
 typedef struct
 {
@@ -251,8 +274,8 @@ static void print_kmer_stats()
 
   if(num_of_zero_covg_kmers > 0)
   {
-    report_error("%s kmers have no coverage in any colour\n",
-                 ulong_to_str(num_of_zero_covg_kmers, num_str));
+    report_warning("%s kmers have no coverage in any colour\n",
+                   ulong_to_str(num_of_zero_covg_kmers, num_str));
   }
 
   if((print_kmers || parse_kmers) && print_info)
@@ -308,8 +331,8 @@ static void print_kmer_stats()
       hash_entries = (0x1UL << mem_height) * mem_width;
     }
 
-    char min_mem_required[32];
-    char rec_mem_required[32];
+    char min_mem_required[50];
+    char rec_mem_required[50];
 
     set_memory_required_str(kmer_count, min_mem_required);
     set_memory_required_str(hash_entries, rec_mem_required);
@@ -318,7 +341,7 @@ static void print_kmer_stats()
     printf("Memory suggested: --mem_width %lu --mem_height %lu\n",
            mem_width, mem_height);
 
-    char hash_entries_numstr[32];
+    char hash_entries_numstr[50];
     ulong_to_str(hash_entries, hash_entries_numstr);
 
     printf("  [%s entries; %s memory]\n", hash_entries_numstr, rec_mem_required);
@@ -328,6 +351,7 @@ static void print_kmer_stats()
 static void my_fread(FILE *fh, void *ptr, int size, const char* entry_name)
 {
   int read = fread_buf(fh, ptr, size, buffer);
+  // int read = fread(ptr, 1, size, fh);
 
   if(read != size)
   {
@@ -447,30 +471,7 @@ static void print_colour_shades(uint8_t *shades, uint8_t *shends)
 
 static void print_usage()
 {
-  fprintf(stderr,
-"usage: cortex_bin_reader [OPTIONS] <binary.ctx>\n"
-"  Prints out header information and kmers for cortex_var binary files.  Runs\n"
-"  several checks to test if binary file is valid. \n"
-"\n"
-"  OPTIONS:\n"
-"  --print_info    Print header info and exit. If used on its own kmers are not\n"
-"                  printed or checked (fast option).\n"
-"\n"
-"  --print_kmers   Print each kmer. If used on its own, other information\n"
-"                  (i.e. headers) is not printed out\n"
-"\n"
-"  --parse_kmers   Print header info, parse but don't print kmers [default]\n"
-"\n"
-"  If no options are specified '--parse_kmers --print_info' is used.\n"
-"\n"
-"  Kmers are printed in the order they are listed in the file. \n"
-"  For each kmer we print: <kmer_seq> <covg_in_col0 ...> <edges_in_col0 ...>\n"
-"    e.g. GTAAGTGCCA 6 4 ..g....T .c..A..T\n"
-"         means col 0: covg 6 [G]GTAAGTGCCA[T]\n"
-"               col 1: covg 4 [C]GTAAGTGCCA[A|T]\n"
-"\n"
-"  Comments/bugs/requests: <turner.isaac@gmail.com>\n");
-
+  fprintf(stderr, usage);
   exit(EXIT_FAILURE);
 }
 
@@ -614,15 +615,13 @@ int main(int argc, char** argv)
   //
 
   // Read array of mean read lengths per colour
-  uint32_t *mean_read_lens_per_colour
-    = (uint32_t*)malloc(num_of_colours*sizeof(uint32_t));
+  uint32_t *mean_read_lens_per_colour = malloc(num_of_colours*sizeof(uint32_t));
 
   my_fread(fh, mean_read_lens_per_colour, sizeof(uint32_t) * num_of_colours,
            "mean read length for each colour");
 
   // Read array of total seq loaded per colour
-  uint64_t *total_seq_loaded_per_colour
-    = (uint64_t*)malloc(num_of_colours*sizeof(uint64_t));
+  uint64_t *total_seq_loaded_per_colour = malloc(num_of_colours*sizeof(uint64_t));
 
   my_fread(fh, total_seq_loaded_per_colour, sizeof(uint64_t) * num_of_colours,
            "total sequance loaded for each colour");
@@ -634,7 +633,7 @@ int main(int argc, char** argv)
 
   if(version >= 6)
   {
-    sample_names = (char**)malloc(sizeof(char*) * num_of_colours);
+    sample_names = malloc(sizeof(char*) * num_of_colours);
 
     for(i = 0; i < num_of_colours; i++)
     {
@@ -668,7 +667,7 @@ int main(int argc, char** argv)
     my_fread(fh, seq_error_rates, sizeof(long double) * num_of_colours,
              "seq error rates");
 
-    cleaning_infos = (CleaningInfo*)malloc(sizeof(CleaningInfo) * num_of_colours);
+    cleaning_infos = malloc(sizeof(CleaningInfo) * num_of_colours);
 
     for(i = 0; i < num_of_colours; i++)
     {
@@ -848,14 +847,20 @@ int main(int argc, char** argv)
   size_t shade_array_bytes = shade_bytes * num_of_colours;
 
   // Kmer data
-  uint64_t* kmer = (uint64_t*)malloc(sizeof(uint64_t) * num_of_bitfields);
-  uint32_t* covgs = (uint32_t*)malloc(sizeof(uint32_t) * num_of_colours);
-  uint8_t* edges = (uint8_t*)malloc(sizeof(uint8_t) * kmer_size);
-  uint8_t* shade_data = (uint8_t*)malloc(shade_array_bytes);
-  uint8_t* shend_data = (uint8_t*)malloc(shade_array_bytes);
+  uint64_t* kmer = malloc(sizeof(uint64_t) * num_of_bitfields);
+  uint32_t* covgs = malloc(sizeof(uint32_t) * num_of_colours);
+  uint8_t* edges = malloc(sizeof(uint8_t) * num_of_colours);
+  uint8_t* shade_data = malloc(shade_array_bytes);
+  uint8_t* shend_data = malloc(shade_array_bytes);
+
+  if(kmer == NULL || covgs == NULL || edges == NULL ||
+     shade_data == NULL || shend_data == NULL) {
+    report_error("Out of memory");
+    exit(EXIT_SUCCESS);
+  }
 
   // Convert values to strings
-  char* seq = (char*)malloc(sizeof(char) * kmer_size);
+  char* seq = malloc(sizeof(char) * kmer_size);
   char kmer_colour_edge_str[9];
 
   // Check top word of each kmer
@@ -868,6 +873,7 @@ int main(int argc, char** argv)
   // the file
   size_t bytes_read;
 
+  // while((bytes_read = fread(kmer, 1, num_bytes_per_bkmer, fh)) > 0)
   while((bytes_read = fread_buf(fh, kmer, num_bytes_per_bkmer, buffer)) > 0)
   {
     if(bytes_read != num_bytes_per_bkmer)
@@ -933,23 +939,14 @@ int main(int argc, char** argv)
     }
 
     // Check covg is 0 for all colours
-    char kmer_has_covg = 0;
+    for(i = 0; i < num_of_colours && covgs[i] == 0; i++);
 
-    for(i = 0; i < num_of_colours; i++)
-    {
-      if(covgs[i] > 0)
-      {
-        kmer_has_covg = 1;
-        break;
-      }
-    }
-
-    if(kmer_has_covg == 0)
+    if(i == num_of_colours)
     {
       if(num_of_zero_covg_kmers == 0)
       {
-        report_error("a kmer has zero coverage in all colours [index: %lu]\n",
-                     num_of_kmers_read);
+        report_warning("a kmer has zero coverage in all colours [index: %lu]\n",
+                       num_of_kmers_read);
       }
 
       num_of_zero_covg_kmers++;
@@ -1031,7 +1028,7 @@ int main(int argc, char** argv)
   {
     printf("----\n");
     if(num_warnings > 0 || num_errors > 0)
-      printf("Warning: %u; Errors: %u", num_warnings, num_errors);
+      printf("Warning: %u; Errors: %u\n", num_warnings, num_errors);
     if(num_errors == 0)
       printf(num_warnings ? "Binary may be ok\n" : "Binary is valid\n");
   }
