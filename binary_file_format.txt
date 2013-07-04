@@ -97,8 +97,8 @@ char        |   1   | was there top clipping (0x1=yes | 0x0=no)
 char        |   1   | was --remove_low_covg_supernodes used (0x1=yes | 0x0=no)
 char        |   1   | was --remove_low_covg_kmers used (0x1=yes | 0x0=no)
 char        |   1   | was this colour cleaned against a graph (0x1=yes | 0x0=no)
-uint32_t    |   1   | threshold for --remove_low_coverage_supernodes
-uint32_t    |   1   | threshold for --remove_low_coverage_kmer
+int32_t     |   1   | threshold for --remove_low_coverage_supernodes
+int32_t     |   1   | threshold for --remove_low_coverage_kmer
 uint32_t    |   1   | length of name of graph against which this colour was cleaned (<len>)
 char        | <len> | name of graph against which this colour was cleaned
 --------------------------------------------------------------------------------

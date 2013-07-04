@@ -26,8 +26,8 @@ typedef struct
   char remove_low_covg_supernodes;
   char remove_low_covg_kmers;
   char cleaned_against_graph;
-  uint32_t remove_low_covg_supernodes_thresh;
-  uint32_t remove_low_covg_kmers_thresh;
+  int32_t remove_low_covg_supernodes_thresh;
+  int32_t remove_low_covg_kmers_thresh;
   char* name_of_graph_clean_against;
 } CleaningInfo;
 
@@ -681,16 +681,32 @@ int main(int argc, char** argv)
                "cleaned against graph");
 
       my_fread(fh, &(cleaning_infos[i].remove_low_covg_supernodes_thresh),
-               sizeof(uint32_t), "remove low covg supernode threshold");
+               sizeof(int32_t), "remove low covg supernode threshold");
     
       my_fread(fh, &(cleaning_infos[i].remove_low_covg_kmers_thresh),
-               sizeof(uint32_t), "remove low covg kmer threshold");
+               sizeof(int32_t), "remove low covg kmer threshold");
+
+      if(version > 6)
+      {
+        if(cleaning_infos[i].remove_low_covg_supernodes_thresh < 0)
+        {
+          report_warning("Binary header gives sample %i a cleaning threshold of "
+                         "%i for supernodes (should be >= 0)\n",
+                         i, cleaning_infos[i].remove_low_covg_supernodes_thresh);
+        }
+        if(cleaning_infos[i].remove_low_covg_kmers_thresh < 0)
+        {
+          report_warning("Binary header gives sample %i a cleaning threshold of "
+                         "%i for kmers (should be >= 0)\n",
+                         i, cleaning_infos[i].remove_low_covg_kmers_thresh);
+        }
+      }
 
       if(!cleaning_infos[i].remove_low_covg_supernodes &&
          cleaning_infos[i].remove_low_covg_supernodes_thresh > 0)
       {
         report_warning("Binary header gives sample %i a cleaning threshold of "
-                       "%u for supernodes when no cleaning was performed\n",
+                       "%i for supernodes when no cleaning was performed\n",
                        i, cleaning_infos[i].remove_low_covg_supernodes_thresh);
       }
 
@@ -698,7 +714,7 @@ int main(int argc, char** argv)
          cleaning_infos[i].remove_low_covg_kmers_thresh > 0)
       {
         report_warning("Binary header gives sample %i a cleaning threshold of "
-                       "%u for kmers when no cleaning was performed\n",
+                       "%i for kmers when no cleaning was performed\n",
                        i, cleaning_infos[i].remove_low_covg_kmers_thresh);
       }
 
