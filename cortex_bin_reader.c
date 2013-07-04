@@ -74,7 +74,7 @@ off_t file_size;
 size_t num_bytes_read = 0;
 
 // Does this file pass all tests?
-char valid_file = 1;
+uint32_t num_errors = 0, num_warnings = 0;
 
 // Reading stats
 unsigned long num_of_kmers_read = 0;
@@ -86,9 +86,20 @@ unsigned long num_of_all_zero_kmers = 0;
 unsigned long num_of_oversized_kmers = 0;
 unsigned long num_of_zero_covg_kmers = 0;
 
+static void report_warning(const char* fmt, ...)
+{
+  num_warnings++;
+
+  va_list argptr;
+  va_start(argptr, fmt);
+  fprintf(stderr, "Warning: ");
+  vfprintf(stderr, fmt, argptr);
+  va_end(argptr);
+}
+
 static void report_error(const char* fmt, ...)
 {
-  valid_file = 0;
+  num_errors++;
 
   va_list argptr;
   va_start(argptr, fmt);
@@ -646,9 +657,9 @@ int main(int argc, char** argv)
         if(sample_name_len != str_length)
         {
           // Premature \0 in string
-          report_error("Sample %i name has length %lu but is only %lu chars long "
-                       "(premature '\\0')\n",
-                       i, str_length, sample_name_len);
+          report_warning("Sample %i name has length %lu but is only %lu chars "
+                         "long (premature '\\0')\n",
+                         i, str_length, sample_name_len);
         }
       }
     }
@@ -678,17 +689,17 @@ int main(int argc, char** argv)
       if(!cleaning_infos[i].remove_low_covg_supernodes &&
          cleaning_infos[i].remove_low_covg_supernodes_thresh > 0)
       {
-        report_error("Binary header gives sample %i a cleaning threshold of "
-                     "%u for supernodes when no cleaning was performed\n",
-                     i, cleaning_infos[i].remove_low_covg_supernodes_thresh);
+        report_warning("Binary header gives sample %i a cleaning threshold of "
+                       "%u for supernodes when no cleaning was performed\n",
+                       i, cleaning_infos[i].remove_low_covg_supernodes_thresh);
       }
 
       if(!cleaning_infos[i].remove_low_covg_kmers &&
          cleaning_infos[i].remove_low_covg_kmers_thresh > 0)
       {
-        report_error("Binary header gives sample %i a cleaning threshold of "
-                     "%u for kmers when no cleaning was performed\n",
-                     i, cleaning_infos[i].remove_low_covg_kmers_thresh);
+        report_warning("Binary header gives sample %i a cleaning threshold of "
+                       "%u for kmers when no cleaning was performed\n",
+                       i, cleaning_infos[i].remove_low_covg_kmers_thresh);
       }
 
       uint32_t name_length;
@@ -715,9 +726,9 @@ int main(int argc, char** argv)
         if(cleaned_name_len != name_length)
         {
           // Premature \0 in string
-          report_error("Sample [%i] cleaned-against-name has length %u but is "
-                       "only %u chars long (premature '\\0')\n",
-                       i, name_length, cleaned_name_len);
+          report_warning("Sample [%i] cleaned-against-name has length %u but is "
+                         "only %u chars long (premature '\\0')\n",
+                         i, name_length, cleaned_name_len);
         }
       }
     }
@@ -1003,7 +1014,10 @@ int main(int argc, char** argv)
   if((print_kmers || parse_kmers) && print_info)
   {
     printf("----\n");
-    printf(valid_file ? "Binary appears to be valid\n" : "Binary has errors\n");
+    if(num_warnings > 0 || num_errors > 0)
+      printf("Warning: %u; Errors: %u", num_warnings, num_errors);
+    if(num_errors == 0)
+      printf(num_warnings ? "Binary may be ok\n" : "Binary is valid\n");
   }
 
   exit(EXIT_SUCCESS);
