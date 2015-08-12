@@ -1,6 +1,8 @@
 cortex_binary_reader
 ====================
-    
+
+NOTE: It is recommended to use the [McCortex](https://github.com/mcveanlab/mccortex) `view` and `check` commands to read cortex graph files instead
+
 Reads cortex binary files and prints contents.  
 
 Build
